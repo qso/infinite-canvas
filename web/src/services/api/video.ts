@@ -2,12 +2,14 @@ import axios from "axios";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
+import { H3_DEFAULT_STEPS, isMiniMaxH3, isMiniMaxH3Fast } from "@/constant/comfyui";
 import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
-import { clampVideoSeconds, computeVideoSize, inferVideoRatio } from "@/lib/media-size";
+import { clampVideoSeconds, computeVideoSize, inferVideoRatio, parseVideoResolution } from "@/lib/media-size";
 import { getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
+import { createH3VideoTask, pollH3VideoTask } from "./comfyui-h3";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -19,7 +21,7 @@ type VideoMediaOptions = RequestOptions & { videos?: ReferenceVideo[]; audios?: 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
-export type VideoGenerationTask = { id: string; provider: "openai" | "gemini" | "plugin"; model: string };
+export type VideoGenerationTask = { id: string; provider: "openai" | "gemini" | "plugin" | "comfyui"; model: string };
 type GeminiInlineData = { bytesBase64Encoded: string; mimeType: string };
 type GeminiVideoOperation = {
     name?: string;
@@ -48,12 +50,13 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 }
 
 export async function waitForVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    const maxAttempts = task.provider === "comfyui" ? 240 : 120;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const state = await pollVideoGenerationTask(config, task, options);
         if (state.status === "completed") return state.result;
         if (state.status === "failed") throw videoTaskFailed(state.error);
-        if (attempt === 119) throw new Error(apiText("videoTimeout", { provider: "" }));
+        if (attempt === maxAttempts - 1) throw new Error(task.provider === "comfyui" ? "本轮查询已结束，云端任务可能仍在生成。任务编号已保留，请继续查询；不会重复生成。" : apiText("videoTimeout", { provider: "" }));
         await delay(2500, options?.signal);
     }
     throw new Error(apiText("videoTimeout", { provider: "" }));
@@ -71,6 +74,54 @@ function videoTaskFailed(message: string) {
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     const selectedModel = (config.model || config.videoModel).trim();
+    if (isMiniMaxH3(selectedModel)) {
+        if (boolConfig(config.videoWatermark, false)) throw new Error("当前 H3 工作流不添加水印，请关闭水印选项。");
+        const images = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
+        const videos = await Promise.all((options?.videos || []).map((video) => referenceMediaToFile(video, "ref.mp4", "invalidReferenceVideo", options)));
+        const audios = await Promise.all((options?.audios || []).map((audio) => referenceMediaToFile(audio, "ref.mp3", "invalidReferenceAudio", options)));
+        const mode = config.videoMode === "text" ? "text" : config.videoMode === "reference" || images.length > 2 || videos.length || audios.length ? "reference" : images.length ? "frames" : "text";
+        let [width, height] = (normalizeVideoSize(config.size, config.vquality) || "1280x720").split("x").map(Number);
+        let seconds = Number(normalizeVideoSeconds(config.videoSeconds));
+        if (config.size === "auto" && videos[0]) {
+            // Reference video as the base (character replacement / style transfer): follow its aspect and duration.
+            try {
+                const source = await readVideoMetadata(videos[0]);
+                if (source.width && source.height) {
+                    const shortEdge = Number(parseVideoResolution(config.vquality)) || 720;
+                    const scale = shortEdge / Math.min(source.width, source.height);
+                    width = source.width * scale;
+                    height = source.height * scale;
+                }
+                if (source.duration) seconds = Number(clampVideoSeconds(String(Math.round(source.duration))));
+            } catch {
+                // 无法解析视频信息时沿用用户设置。
+            }
+        } else if (config.size === "auto" && images[0]) {
+            const bitmap = await createImageBitmap(images[0]);
+            const shortEdge = Number(parseVideoResolution(config.vquality)) || 720;
+            const scale = shortEdge / Math.min(bitmap.width, bitmap.height);
+            width = bitmap.width * scale;
+            height = bitmap.height * scale;
+            bitmap.close();
+        }
+        // No external resolution downsising for the fast version: SelfLiftAvatar manages
+        // resolution internally (low-res prefix → lift → tiled high-res). >2K targets still
+        // sample at half size and are restored by the X2 VAE decode — SelfLift's tiled
+        // high-res phase runs at the requested resolution and native 4K exceeds 32GB VRAM.
+        const fast = isMiniMaxH3Fast(selectedModel);
+        const hd = boolConfig(config.videoHd, false);
+        const upscale = Math.min(width, height) > 1440 ? 1 : 0;
+        const id = await createH3VideoTask({
+            prompt, mode, width: width / (upscale ? 2 : 1), height: height / (upscale ? 2 : 1), seconds,
+            seed: config.videoSeed?.trim() ? Number(config.videoSeed) : crypto.getRandomValues(new Uint32Array(1))[0],
+            steps: Number(config.videoSteps || H3_DEFAULT_STEPS),
+            fast, hd,
+            upscale,
+            refImageSize: (config.videoRefImageSize || "match") as "match" | "max",
+            images, videos, audios, generateAudio: boolConfig(config.videoGenerateAudio, true),
+        }, options?.signal);
+        return { id, provider: "comfyui", model: selectedModel };
+    }
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const script = resolveModelScript(config, selectedModel);
     if (script) return createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, options);
@@ -80,6 +131,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
 }
 
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    if (task.provider === "comfyui") return pollH3VideoTask(task.id, options?.signal);
     if (task.provider === "plugin") {
         const result = pluginVideoResults.get(task.id);
         return result ? { status: "completed", result } : { status: "failed", error: apiText("pluginVideoExpired") };
@@ -307,6 +359,17 @@ async function referenceMediaToFile(item: { name: string; type?: string; url?: s
 
 function normalizeVideoSeconds(value: string) {
     return clampVideoSeconds(value);
+}
+
+function readVideoMetadata(file: File) {
+    const url = URL.createObjectURL(file);
+    return new Promise<{ width: number; height: number; duration: number }>((resolve, reject) => {
+        const video = document.createElement("video");
+        video.preload = "metadata";
+        video.onloadedmetadata = () => resolve({ width: video.videoWidth, height: video.videoHeight, duration: Number.isFinite(video.duration) ? video.duration : 0 });
+        video.onerror = () => reject(new Error(apiText("invalidReferenceVideo")));
+        video.src = url;
+    }).finally(() => URL.revokeObjectURL(url));
 }
 
 function resolveVideoMode(mode: string | undefined, imageCount: number) {

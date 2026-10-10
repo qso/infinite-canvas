@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
+import { H3_DEFAULT_STEPS, isMiniMaxH3, MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION } from "@/constant/comfyui";
 
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -44,6 +45,10 @@ export type AiConfig = {
     videoGenerateAudio: string;
     videoWatermark: string;
     videoMode: string;
+    videoSteps: string;
+    videoSeed: string;
+    videoRefImageSize: string;
+    videoHd: string;
     systemPrompt: string;
     reasoningEffort: ReasoningEffort;
     models: string[];
@@ -99,7 +104,7 @@ export const defaultConfig: AiConfig = {
     ],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video",
+    videoModel: MINIMAX_H3_FAST_OPTION,
     textModel: "default::gpt-5.5",
     audioModel: "default::gpt-4o-mini-tts",
     audioVoice: "alloy",
@@ -111,6 +116,10 @@ export const defaultConfig: AiConfig = {
     videoGenerateAudio: "true",
     videoWatermark: "false",
     videoMode: "frames",
+    videoSteps: String(H3_DEFAULT_STEPS),
+    videoSeed: "",
+    videoRefImageSize: "match",
+    videoHd: "false",
     systemPrompt: "",
     reasoningEffort: "auto",
     models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
@@ -156,6 +165,7 @@ const IMAGE_KEYWORDS = ["seedream", "gpt-image", "image", "dall-e", "dalle", "im
 
 /** Best-effort default capability for a freshly fetched model name; user can override in the channel editor. */
 export function guessCapability(name: string): ModelCapability {
+    if (isMiniMaxH3(name)) return "video";
     const value = name.toLowerCase();
     if (VIDEO_KEYWORDS.some((keyword) => value.includes(keyword))) return "video";
     if (AUDIO_KEYWORDS.some((keyword) => value.includes(keyword))) return "audio";
@@ -172,6 +182,7 @@ function findChannelModel(config: AiConfig, value: string): { channel: ModelChan
 }
 
 export function modelCapabilityOf(config: AiConfig, value: string): ModelCapability | undefined {
+    if (isMiniMaxH3(value)) return "video";
     return findChannelModel(config, value)?.model.capability;
 }
 
@@ -189,8 +200,8 @@ export function resolveModelForCapability(config: AiConfig, currentModel: string
 }
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
-    if (!capability) return config.models;
-    return config.channels.flatMap((channel) => channel.models.filter((model) => model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name)));
+    const models = capability ? config.channels.flatMap((channel) => channel.models.filter((model) => model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name))) : config.models;
+    return Array.from(new Set([...(!capability || capability === "video" ? [MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION] : []), ...models]));
 }
 
 /** The user script (if any) attached to a model; empty string means use the system default call. */
@@ -199,6 +210,7 @@ export function resolveModelScript(config: AiConfig, value: string) {
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
+    if (isMiniMaxH3(model)) return true;
     const channel = resolveModelChannel(config, model);
     return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
 }
@@ -269,7 +281,7 @@ export const useConfigStore = create<ConfigStore>()(
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
-                        videoMode: config.videoMode === "reference" ? "reference" : "frames",
+                        videoMode: config.videoMode === "reference" || config.videoMode === "text" ? config.videoMode : "frames",
                         canvasImageCount: config.canvasImageCount || "3",
                         proxyEnabled: Boolean(config.proxyEnabled),
                         proxyUrl: config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,
@@ -395,6 +407,10 @@ export function modelOptionName(value: string) {
 }
 
 export function modelOptionLabel(config: AiConfig, value: string) {
+    // Only the two built-in comfyui options get the cloud label; a channel model
+    // that happens to be named like MiniMax-H3 keeps its channel label instead.
+    if (value === MINIMAX_H3_FAST_OPTION) return "MiniMax H3 加速版（云端 ComfyUI）";
+    if (value === MINIMAX_H3_OPTION) return "MiniMax-H3（云端 ComfyUI）";
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
@@ -408,6 +424,7 @@ export function modelOptionsFromChannels(channels: ModelChannel[]) {
 export function normalizeModelOptionValue(value: string | undefined, channels: ModelChannel[]) {
     const model = (value || "").trim();
     if (!model) return "";
+    if (model === MINIMAX_H3_OPTION || model === MINIMAX_H3_FAST_OPTION) return model;
     const decoded = decodeChannelModel(model);
     if (decoded) {
         const channel = channels.find((item) => item.id === decoded.channelId);

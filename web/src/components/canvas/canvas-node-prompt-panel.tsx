@@ -4,6 +4,8 @@ import { Button, Modal, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { ModelPicker } from "@/components/model-picker";
+import { normalizeVideoModeValue } from "@/components/video-settings-panel";
+import { H3_REFERENCE_PROMPT_TEMPLATES, isMiniMaxH3 } from "@/constant/comfyui";
 import { defaultConfig, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -42,6 +44,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = modeOverride ?? defaultMode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
+    const showReferenceTemplates = mode === "video" && isMiniMaxH3(config.model) && normalizeVideoModeValue(config.videoMode) === "reference";
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
@@ -80,6 +83,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
             onWheel={(event) => event.stopPropagation()}
         >
             <CanvasNodeReferenceBar nodeId={node.id} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={onStartReferenceSelection} />
+            {showReferenceTemplates ? <ReferenceTemplateChips prompt={prompt} onApply={updatePrompt} /> : null}
             <CanvasPromptChipInput
                 value={prompt}
                 references={mentionReferences}
@@ -149,6 +153,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
             <Modal title={t("canvas.promptPanel.editorTitle")} open={expanded} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
                     <CanvasNodeReferenceBar nodeId={node.id} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={(nodeId) => { setExpanded(false); onStartReferenceSelection?.(nodeId); }} />
+                    {showReferenceTemplates ? <ReferenceTemplateChips prompt={prompt} onApply={updatePrompt} /> : null}
                     <CanvasPromptChipInput
                         value={prompt}
                         references={mentionReferences}
@@ -159,6 +164,26 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                     />
                 </div>
             </Modal>
+        </div>
+    );
+}
+
+function ReferenceTemplateChips({ prompt, onApply }: { prompt: string; onApply: (value: string) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    return (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+            {H3_REFERENCE_PROMPT_TEMPLATES.map((template) => (
+                <button
+                    key={template.label}
+                    type="button"
+                    className="cursor-pointer rounded-full border px-2.5 py-1 text-xs transition hover:opacity-75"
+                    style={{ background: "transparent", borderColor: theme.toolbar.border, color: theme.node.text }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={() => onApply(prompt.trim() ? `${prompt.trim()}\n${template.prompt}` : template.prompt)}
+                >
+                    {template.label}
+                </button>
+            ))}
         </div>
     );
 }
@@ -180,6 +205,10 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
         videoWatermark: node.metadata?.watermark || globalConfig.videoWatermark || defaultConfig.videoWatermark,
         videoMode: node.metadata?.videoMode || globalConfig.videoMode || defaultConfig.videoMode,
+        videoSteps: node.metadata?.videoSteps ?? globalConfig.videoSteps ?? defaultConfig.videoSteps,
+        videoSeed: node.metadata?.videoSeed ?? globalConfig.videoSeed ?? defaultConfig.videoSeed,
+        videoRefImageSize: node.metadata?.videoRefImageSize ?? globalConfig.videoRefImageSize ?? defaultConfig.videoRefImageSize,
+        videoHd: node.metadata?.videoHd ?? globalConfig.videoHd ?? defaultConfig.videoHd,
         audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice,
         audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,

@@ -5,5 +5,13 @@ description: Planned follow-up work
 
 # TODO
 
+- 修复原仓 v0.19.0 的缩略图取消处理：生成缩略图期间停止任务，应中止结果写回并清理原图、缩略图和内存 URL。
+- 修复缩略图缓存的并发去重与 URL 释放：同一图片的并行读取和生成应复用任务，删除后不得遗留 Blob URL。
+- 修复 H3 任务提交后的本地存储失败处理：已经取得 prompt_id 时保留任务编号并提示继续查询，避免普通重试再次提交。以上问题的复现与建议见 [原仓同步审查](../../../plans/upstream-v0.19.0-review.md)。
+
+- 视频创作台支持上传参考视频和参考音频：当前参考视频/音频只能在画布连线使用，人物替换等「以视频为底」的场景在创作台还无法完整操作。
+- 在需要部署 H3 工作台时补充 Docker/Nginx 的 ComfyUI 固定转发及部署验收；当前接入先使用本地 Vite 开发或预览服务。
+- H3 PDD-Acc 加速：云端已有节点和示例工作流，但专用节点的 `pdd_file` 选项为空；需先核对 `models/pdd_acc` 的模型注册，分别匹配 FL2VA/Ref2VA 权重与对应采样调度，再做实际生成验收后提供加速选项。
+
 - Replace the Claude Code CLI adapter with a Claude Agent SDK adapter and improve the tool queue, following the [Local Agent Integration Plan](/docs/progress/local-agent-integration-plan).
 - Add Skill installation from web search, Skill resource-file management, and controlled local-memory persistence.

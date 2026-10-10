@@ -67,6 +67,9 @@ export type CanvasNodeMetadata = {
     generateAudio?: string;
     watermark?: string;
     videoMode?: string;
+    videoSteps?: string;
+    videoSeed?: string;
+    videoRefImageSize?: string;
     audioVoice?: string;
     audioFormat?: string;
     audioSpeed?: string;
@@ -82,7 +85,7 @@ export type CanvasNodeMetadata = {
     bytes?: number;
     durationMs?: number;
     videoTaskId?: string;
-    videoTaskProvider?: "openai" | "gemini";
+    videoTaskProvider?: "openai" | "gemini" | "comfyui";
     groupId?: string;
     interactive?: boolean; // Plugin node interaction/move state; see CanvasNodeDefinition.interactionToggle.
 };

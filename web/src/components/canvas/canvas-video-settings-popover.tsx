@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Settings2 } from "lucide-react";
+import { Settings2, Volume2, VolumeX } from "lucide-react";
 import { Button } from "antd";
 
-import { VideoSettingsPanel, videoModeLabel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
+import { VideoSettingsPanel, videoAudioLabel, videoModeLabel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
+import { isMiniMaxH3 } from "@/constant/comfyui";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
-import type { AiConfig } from "@/stores/use-config-store";
+import { boolConfig, type AiConfig } from "@/stores/use-config-store";
 
 type CanvasVideoSettingsPopoverProps = {
     config: AiConfig;
@@ -48,10 +49,15 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClass
     return (
         <>
             <span ref={buttonRef} className="inline-flex min-w-0">
-                <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[220px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => setOpen((current) => !current)}>
+                <Button size="small" type="text" aria-label="视频生成设置" className={buttonClassName || "!h-8 !max-w-[220px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => setOpen((current) => !current)}>
                     <span className="truncate">
                         {videoResolutionLabel(config.vquality)} · {videoSizeLabel(config.size)} · {videoSecondsLabel(config.videoSeconds)} · {videoModeLabel(config.videoMode)}
                     </span>
+                    {isMiniMaxH3(config.model || config.videoModel) ? (
+                        <span className="shrink-0" title={videoAudioLabel(config.videoGenerateAudio)} aria-label={videoAudioLabel(config.videoGenerateAudio)}>
+                            {boolConfig(config.videoGenerateAudio, true) ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
+                        </span>
+                    ) : null}
                 </Button>
             </span>
             {panel}

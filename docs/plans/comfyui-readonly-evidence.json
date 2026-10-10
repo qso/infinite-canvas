@@ -1,0 +1,122 @@
+{
+  "scope": "Clone, source inspection, and read-only remote observations. No generation was submitted.",
+  "repository": {
+    "remote": "https://github.com/qso/infinite-canvas.git",
+    "commit": "d213a74614e0e4bd8a26383d1e1e907249e9c61b",
+    "release": "v0.18.0"
+  },
+  "remote": {
+    "base_url": "https://tmax-guian-14009.tmax.netease.com/_dep457/develop/jupyter/dep457-daixinliang-generate-test/proxy/8188/",
+    "explicit_request_credentials": false,
+    "access_scope": "Observed from this machine's current network only. Public access and POST authentication were not verified.",
+    "comfyui_version": "0.34.0",
+    "pytorch_version": "2.13.0+cu130",
+    "device_count": 1,
+    "device_name": "cuda:0 NVIDIA GeForce RTX 5090 : cudaMallocAsync",
+    "api_vram_total_bytes": 33668857856,
+    "queue_running_count": 0,
+    "queue_pending_count": 0,
+    "queried_history_items": 0
+  },
+  "cors": {
+    "origin_tested": "http://localhost:3000",
+    "get_allow_origin": null,
+    "prompt_options_status": 200,
+    "prompt_options_allow_origin": null,
+    "prompt_options_allow_methods": null,
+    "prompt_options_allow_headers": null,
+    "prompt_options_allow_credentials": null
+  },
+  "read_endpoints": [
+    "GET /system_stats",
+    "GET /queue",
+    "GET /history?max_items=4",
+    "GET /models/diffusion_models",
+    "GET /models/text_encoders",
+    "GET /models/vae",
+    "GET /models/loras",
+    "GET /object_info",
+    "GET /userdata?dir=workflows&recurse=true&split=false",
+    "GET /api/userdata/{encoded_workflow_path}",
+    "OPTIONS /prompt"
+  ],
+  "workflow_file_access": {
+    "single_encoded_userdata_path_status": 404,
+    "single_encoded_api_userdata_path_status": 200,
+    "double_encoded_userdata_path_status": 200,
+    "preferred_observed_route": "/api/userdata/{encoded_workflow_path}"
+  },
+  "candidate_workflow": {
+    "path": "workflows/video_minimax_h3_r2v.json",
+    "format": "editor workflow, not exported API format",
+    "node_count": 29,
+    "all_nodes_normal_mode": true,
+    "unregistered_types_excluding_known_editor_only_nodes": [],
+    "browser_tab_has_unsaved_changes": true,
+    "saved_parameters": {
+      "aspect_ratio": "16:9 (Widescreen)",
+      "megapixels": 0.4,
+      "multiple": 32,
+      "duration_setting_seconds": 5,
+      "fps": 24,
+      "turbo_switch": false,
+      "normal_steps": 20,
+      "turbo_steps": 4,
+      "sampler": "res_multistep",
+      "scheduler": "simple",
+      "duration_expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17"
+    },
+    "model_filenames_found_in_api_inventory": [
+      "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "minimax_h3_video_vae_fp16.safetensors",
+      "minimax_h3_audio_vae_fp32.safetensors",
+      "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors"
+    ],
+    "editor_node_mapping": {
+      "prompt": 138,
+      "reference_images": [137, 139],
+      "resolution": 115,
+      "duration_seconds": 132,
+      "duration_math": 131,
+      "seed": 129,
+      "h3_reference_conditioning": 136,
+      "turbo_switch": 146,
+      "create_video": 130,
+      "save_video": 92
+    },
+    "connected_reference_image_count": 2,
+    "connected_reference_video_count": 0,
+    "connected_reference_audio_count": 0,
+    "note": "Configuration inspection only. Sample input availability, exported graph validation, weight loading, actual video output, and runtime performance were not tested."
+  },
+  "other_workflow_observations": [
+    {
+      "path": "workflows/minimax_h3_turbo.json",
+      "node_count": 160,
+      "normal_mode_nodes": 79,
+      "bypass_mode_nodes": 81,
+      "some_unregistered_type_names": ["MiniMaxH3Easy", "MiniMaxH3EasyLoader", "MiniMaxH3EasyOutput", "SolAttnMiniMax"],
+      "note": "Unregistered editor node types do not alone establish an execution failure; API export and dependency reachability require inspection."
+    },
+    {
+      "paths": [
+        "workflows/Minimax H3/Minimax H3 I2V.json",
+        "workflows/Minimax H3/Minimax H3 I2V (with PDD-Acc 8-Steps Turbo Nodes).json"
+      ],
+      "node_counts": [44, 45],
+      "model_path_examples_not_exactly_matched_in_current_model_lists": [
+        "minimaxH3\\minimax_h3_fl2va_int8_convrot.safetensors",
+        "minimax_h3_video_vae_int8_convrot.safetensors"
+      ]
+    }
+  ],
+  "not_performed": [
+    "Dependency installation or application build",
+    "Application implementation changes",
+    "Cloud environment or workflow modification",
+    "POST image upload or prompt submission",
+    "WebSocket handshake or event validation",
+    "Generated video retrieval, playback, or performance measurement"
+  ]
+}

@@ -2,9 +2,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from "vite";
 
 import { parseChangelog } from "./src/lib/release";
+import { COMFYUI_PROXY_PATH } from "./src/constant/comfyui";
 
 const webDir = dirname(fileURLToPath(import.meta.url));
 const localVersion = readFileSync(resolve(webDir, "../VERSION"), "utf8").trim() || "dev";
@@ -38,16 +39,33 @@ function localPluginsManifest(): Plugin {
     };
 }
 
-export default defineConfig({
-    base: process.env.VITE_BASE || "/",
-    plugins: [react(), localPluginsManifest()],
-    resolve: {
-        alias: {
-            "@": resolve(webDir, "src"),
+export default defineConfig(({ mode }) => {
+    // 转发目标来自 web/.env.local 的 COMFYUI_REMOTE_URL；未配置时不注册代理。
+    const comfyuiRemoteUrl = loadEnv(mode, webDir, "").COMFYUI_REMOTE_URL;
+    const comfyuiProxy: Record<string, ProxyOptions> = comfyuiRemoteUrl
+        ? {
+            [COMFYUI_PROXY_PATH]: {
+                target: comfyuiRemoteUrl,
+                changeOrigin: true,
+                rewrite: (path: string) => path.slice(COMFYUI_PROXY_PATH.length),
+                // ComfyUI receives a same-server request; the browser only talks to its own Vite origin.
+                configure: (proxy) => { proxy.on("proxyReq", (request) => request.removeHeader("origin")); },
+            },
+        }
+        : {};
+    return {
+        server: { proxy: comfyuiProxy },
+        preview: { proxy: comfyuiProxy },
+        base: process.env.VITE_BASE || "/",
+        plugins: [react(), localPluginsManifest()],
+        resolve: {
+            alias: {
+                "@": resolve(webDir, "src"),
+            },
         },
-    },
-    define: {
-        __APP_VERSION__: JSON.stringify(localVersion),
-        __APP_RELEASES__: JSON.stringify(parseChangelog(localChangelog)),
-    },
+        define: {
+            __APP_VERSION__: JSON.stringify(localVersion),
+            __APP_RELEASES__: JSON.stringify(parseChangelog(localChangelog)),
+        },
+    };
 });

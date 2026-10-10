@@ -31,6 +31,9 @@
 
 ## Project Progress
 
+- [原仓 v0.19.0 同步与审查](plans/upstream-v0.19.0-review.md)
+- [H3 云端 ComfyUI 接入说明](plans/comfyui-h3-usage.md)
+
 - [Changelog](/docs/progress/changelog)
 - [Pending Tests](/docs/progress/pending-test)
 - [TODO](/docs/progress/todo)

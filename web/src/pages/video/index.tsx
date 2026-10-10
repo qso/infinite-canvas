@@ -9,16 +9,17 @@ import { useTranslation } from "react-i18next";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
-import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoModeLabel, videoSizeLabel } from "@/components/video-settings-panel";
+import { VideoSettingsPanel, normalizeVideoModeValue, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoModeLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { clampVideoSeconds } from "@/lib/media-size";
+import { H3_REFERENCE_PROMPT_TEMPLATES, isMiniMaxH3 } from "@/constant/comfyui";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { deleteStoredMedia, resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, ensureImagePreview, getImagePreviewRevision, previewUrlFor, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
-import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { createVideoGenerationTask, isVideoTaskFailed, waitForVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
-import { boolConfig, modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { boolConfig, defaultConfig, modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
 import i18n from "@/i18n";
@@ -39,6 +40,7 @@ type GenerationResult = {
     status: "pending" | "success" | "failed";
     video?: GeneratedVideo;
     error?: string;
+    resumeLog?: GenerationLog;
 };
 
 type GenerationLog = {
@@ -60,7 +62,7 @@ type GenerationLog = {
     error?: string;
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode" | "videoSteps" | "videoSeed" | "videoRefImageSize">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -234,8 +236,9 @@ export default function VideoPage() {
         return { text, config: buildVideoConfig(effectiveConfig, model), references: [...references] };
     };
 
-    const retryResult = () => {
-        void generate();
+    const retryResult = (result: GenerationResult) => {
+        if (result.resumeLog) void pollGenerationLog(result.resumeLog);
+        else void generate();
     };
 
     const downloadVideo = (video: GeneratedVideo) => {
@@ -312,38 +315,31 @@ export default function VideoPage() {
         activeLogIdsRef.current.add(log.id);
         setRunning(true);
         setStartedAt((value) => value || performance.now());
-        setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
+        setResults([{ id: log.id, status: "pending" }]);
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
         try {
-            for (let attempt = 0; attempt < 120; attempt += 1) {
-                const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
-                if (state.status === "completed") {
-                    const stored = await storeGeneratedVideo(state.result);
-                    const nextVideo: GeneratedVideo = {
-                        id: nanoid(),
-                        url: stored.url,
-                        storageKey: stored.storageKey,
-                        durationMs: Date.now() - log.createdAt,
-                        width: stored.width || 1280,
-                        height: stored.height || 720,
-                        bytes: stored.bytes,
-                        mimeType: stored.mimeType,
-                    };
-                    setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
-                    if (agentTaskId) updateAgentTask(agentTaskId, { status: "succeeded", successCount: 1, failCount: 0, error: undefined });
-                    await saveLog({ ...log, status: "success", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
-                    message.success(t("videoWorkbench.generated"));
-                    return;
-                }
-                if (state.status === "failed") throw new Error(state.error);
-                if (attempt === 119) throw new Error(t("videoWorkbench.timeout"));
-                await delay(2500);
-            }
+            const result = await waitForVideoGenerationTask(configOverride || taskConfig, log.task);
+            const stored = await storeGeneratedVideo(result);
+            const nextVideo: GeneratedVideo = {
+                id: nanoid(),
+                url: stored.url,
+                storageKey: stored.storageKey,
+                durationMs: Date.now() - log.createdAt,
+                width: stored.width || 1280,
+                height: stored.height || 720,
+                bytes: stored.bytes,
+                mimeType: stored.mimeType,
+            };
+            setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
+            if (agentTaskId) updateAgentTask(agentTaskId, { status: "succeeded", successCount: 1, failCount: 0, error: undefined });
+            await saveLog({ ...log, status: "success", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
+            message.success(t("videoWorkbench.generated"));
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
-            setResults([{ id: log.id, status: "failed", error: errorMessage }]);
+            const resumable = log.task.provider === "comfyui" && !isVideoTaskFailed(error);
+            setResults([{ id: log.id, status: "failed", error: errorMessage, resumeLog: resumable ? log : undefined }]);
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", successCount: 0, failCount: 1, error: errorMessage });
-            await saveLog({ ...log, status: "failed", durationMs: Date.now() - log.createdAt, error: errorMessage });
+            await saveLog({ ...log, status: resumable ? "pending" : "failed", durationMs: Date.now() - log.createdAt, error: errorMessage });
             message.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
@@ -366,7 +362,11 @@ export default function VideoPage() {
         if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
         if (log.config.videoMode) updateConfig("videoMode", log.config.videoMode);
+        updateConfig("videoSteps", log.config.videoSteps);
+        updateConfig("videoSeed", log.config.videoSeed);
+        updateConfig("videoRefImageSize", log.config.videoRefImageSize);
         setResults(log.status === "pending" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || t("workbench.generationFailed") }]);
+        if (log.status === "pending" && log.task) void pollGenerationLog(log);
     };
 
     return (
@@ -403,6 +403,15 @@ export default function VideoPage() {
                                         </Button>
                                     </div>
                                 </div>
+                                {isMiniMaxH3(model) && normalizeVideoModeValue(effectiveConfig.videoMode) === "reference" ? (
+                                    <div className="mb-2 flex flex-wrap gap-1.5">
+                                        {H3_REFERENCE_PROMPT_TEMPLATES.map((template) => (
+                                            <button key={template.label} type="button" className="cursor-pointer rounded-full border border-stone-300 px-2.5 py-1 text-xs text-stone-600 transition hover:opacity-75 dark:border-stone-700 dark:text-stone-300" onClick={() => setPrompt((value) => (value.trim() ? `${value.trim()}\n${template.prompt}` : template.prompt))}>
+                                                {template.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : null}
                                 <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={t("videoWorkbench.promptPlaceholder")} />
                             </div>
 
@@ -470,7 +479,7 @@ export default function VideoPage() {
                         </div>
                         {results.length ? (
                             <div className="grid gap-4">
-                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={retryResult} /> : <PendingVideoCard key={result.id} />))}
+                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || t("workbench.generationFailed")} resumable={Boolean(result.resumeLog)} onRetry={() => retryResult(result)} /> : <PendingVideoCard key={result.id} />))}
                             </div>
                         ) : (
                             <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
@@ -520,7 +529,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
-                <VideoSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
+                <VideoSettingsPanel config={{ ...config, model }} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
             </div>
         </>
     );
@@ -564,19 +573,19 @@ function PendingVideoCard() {
     );
 }
 
-function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+function FailedVideoCard({ error, resumable, onRetry }: { error: string; resumable: boolean; onRetry: () => void }) {
     const { t } = useTranslation();
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-video flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="text-sm font-medium text-red-600 dark:text-red-300">{t("workbench.failed")}</div>
+                <div className="text-sm font-medium text-red-600 dark:text-red-300">{resumable ? "结果待取回" : t("workbench.failed")}</div>
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
                     {error}
                 </Typography.Paragraph>
             </div>
             <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
                 <Button size="small" danger onClick={onRetry}>
-                    {t("workbench.retry")}
+                    {resumable ? "继续查询" : t("workbench.retry")}
                 </Button>
             </div>
         </div>
@@ -735,7 +744,10 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         videoSeconds: log.config?.videoSeconds || log.seconds || "",
         videoGenerateAudio: log.config?.videoGenerateAudio || "true",
         videoWatermark: log.config?.videoWatermark || "false",
-        videoMode: log.config?.videoMode === "reference" ? "reference" : "frames",
+        videoMode: normalizeVideoModeValue(log.config?.videoMode),
+        videoSteps: log.config?.videoSteps ?? defaultConfig.videoSteps,
+        videoSeed: log.config?.videoSeed ?? defaultConfig.videoSeed,
+        videoRefImageSize: log.config?.videoRefImageSize ?? defaultConfig.videoRefImageSize,
     };
 }
 
@@ -748,7 +760,10 @@ function buildLog({ prompt, model, config, references, durationMs, status, task,
         videoSeconds: config.videoSeconds,
         videoGenerateAudio: config.videoGenerateAudio,
         videoWatermark: config.videoWatermark,
-        videoMode: config.videoMode === "reference" ? "reference" : "frames",
+        videoMode: normalizeVideoModeValue(config.videoMode),
+        videoSteps: config.videoSteps,
+        videoSeed: config.videoSeed,
+        videoRefImageSize: config.videoRefImageSize,
     };
     return {
         id: nanoid(),
@@ -780,7 +795,7 @@ function buildVideoConfig(config: AiConfig, model: string): AiConfig {
         vquality: normalizeResolution(config.vquality),
         videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),
         videoWatermark: String(boolConfig(config.videoWatermark, false)),
-        videoMode: config.videoMode === "reference" ? "reference" : "frames",
+        videoMode: normalizeVideoModeValue(config.videoMode),
     };
 }
 
@@ -795,8 +810,4 @@ function normalizeVideoSize(value: string) {
 
 function normalizeResolution(value: string) {
     return normalizeVideoResolutionValue(value);
-}
-
-function delay(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }
