@@ -1,0 +1,545 @@
+web/src/services/api/comfyui-h3-workflow.ts
+  058e0fc058bdfe6f 3-11,17-23,37,39-40,50-53,64-65,68-69,76,81-85,87-89,91,93-94,96,136,233
+  a48d4e9e88fa1390 2,12,16,60-63,86
+  8dc964cd1d5299ba 1,13-15,24-36,38,41-49,54-59,66-67,70-75,77-80,90,92,95,97-135,137-232
+web/src/components/canvas/canvas-config-node-panel.tsx
+  69b01347cd1bacf2 163-165
+CHANGELOG.md
+  a48d4e9e88fa1390 14-16
+  8dc964cd1d5299ba 5-13
+  69b01347cd1bacf2 17-18
+web/src/components/video-settings-panel.tsx
+  8dc964cd1d5299ba 7,18-19,31,40,70-71,78,127-147,164,171-172
+  058e0fc058bdfe6f 39,41,112-113,115,194
+  a48d4e9e88fa1390 2-3,11,60-68,120-126,148-163,189-190
+web/src/services/api/comfyui-h3.ts
+  8dc964cd1d5299ba 4,9,37
+  2f3cf42aed675676 25
+  058e0fc058bdfe6f 1-3,5-8,10-24,26-36,38-82
+docs/plans/upstream-v0.19.0-review.md
+  69b01347cd1bacf2 1-61
+web/src/components/canvas/canvas-video-settings-popover.tsx
+  69b01347cd1bacf2 3,6-7,10,52,56-60
+web/src/types/canvas.ts
+  a48d4e9e88fa1390 70-72
+  058e0fc058bdfe6f 88
+docs/plans/comfyui-readonly-evidence.json
+  058e0fc058bdfe6f 1-122
+docs/content/docs/progress/pending-test.mdx
+  058e0fc058bdfe6f 23-24
+  8dc964cd1d5299ba 10-16
+  a48d4e9e88fa1390 17-20
+docs/plans/comfyui-h3-usage.md
+  058e0fc058bdfe6f 1-15,31-40,43,45-51,53-65,69-74
+  a48d4e9e88fa1390 16-30,41-42,44,52,66-68
+web/src/lib/canvas/canvas-generation-helpers.ts
+  69b01347cd1bacf2 118-120
+  8dc964cd1d5299ba 121
+web/src/services/api/video.ts
+  a48d4e9e88fa1390 53-54,59,114,116-117,120-122
+  058e0fc058bdfe6f 12,24,77-82,100,103-105,123-124,134
+  8dc964cd1d5299ba 5,7,83-99,101-102,106-113,115,118-119,364-374
+docs/index.md
+  a48d4e9e88fa1390 34
+  058e0fc058bdfe6f 35-36
+web/scripts/comfyui-h3.test.ts
+  a48d4e9e88fa1390 17,27,40-64
+  058e0fc058bdfe6f 1-16,18-26,28-39,65-66
+docs/plans/comfyui-integration-plan.md
+  69b01347cd1bacf2 1-157
+docs/plans/h3-x2-decode-node.py
+  8dc964cd1d5299ba 1-217
+web/src/constant/comfyui.ts
+  2f3cf42aed675676 1
+  058e0fc058bdfe6f 3,8-10,15
+  a48d4e9e88fa1390 4,6
+  8dc964cd1d5299ba 2,5,7,11-14,16-23
+web/src/i18n/locales/zh-CN.ts
+  058e0fc058bdfe6f 34
+  8dc964cd1d5299ba 489
+web/src/pages/video/index.tsx
+  058e0fc058bdfe6f 12,532,747,763,798
+  8dc964cd1d5299ba 15,406-414
+  2f3cf42aed675676 19,43,239-241,318,321-336,339-340,342,369,482,576,581,588
+  a48d4e9e88fa1390 22,65,365-367,748-750,764-766
+web/src/i18n/locales/en-US.ts
+  8dc964cd1d5299ba 489
+  058e0fc058bdfe6f 34
+web/vite.config.ts
+  8dc964cd1d5299ba 5,8,42-64,66-70
+web/src/components/canvas/canvas-node-prompt-panel.tsx
+  69b01347cd1bacf2 208-210
+  8dc964cd1d5299ba 7-8,47,86,156,171-190,211
+web/src/pages/canvas/project.tsx
+  2f3cf42aed675676 312-313
+  a48d4e9e88fa1390 353-355,2542-2544,2565-2567,2824-2826
+  058e0fc058bdfe6f 340
+  8dc964cd1d5299ba 356,2545,2568,2827
+docs/plans/h3-acceleration-summary.md
+  8dc964cd1d5299ba 1-119
+web/src/stores/use-config-store.ts
+  058e0fc058bdfe6f 168,185,203,213,284
+  8dc964cd1d5299ba 7,51,107,122,204,410-413,427
+  a48d4e9e88fa1390 48-50,119-121
+web/.env.local
+  8dc964cd1d5299ba 1-2
+docs/content/docs/progress/todo.mdx
+  a48d4e9e88fa1390 8-11,14
+  058e0fc058bdfe6f 13,15
+  8dc964cd1d5299ba 12
+web/scripts/test-h3-live.ts
+  2f3cf42aed675676 2,7,14-16,18,23-24,31
+  8dc964cd1d5299ba 8-9
+  058e0fc058bdfe6f 1,3-6,10-13,17,19-22,25-30,32-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "7016a7b4a348dcae1bd3b5775ebcee41c0665232",
+  "prompts": {
+    "058e0fc058bdfe6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a084ec-9a0d-7551-b2f7-f8ffe2e501df",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 689,
+      "total_deletions": 31,
+      "accepted_lines": 433,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "docs/plans/comfyui-integration-plan.md": {
+          "additions": 157
+        },
+        "web/src/components/video-settings-panel.tsx": {
+          "additions": 8,
+          "deletions": 4,
+          "accepted_lines": 6
+        },
+        "web/src/i18n/locales/zh-CN.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "web/src/types/canvas.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "web/src/services/api/video.ts": {
+          "additions": 22,
+          "deletions": 1,
+          "accepted_lines": 15
+        },
+        "docs/index.md": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "web/src/services/api/comfyui-h3.ts": {
+          "additions": 84,
+          "deletions": 2,
+          "accepted_lines": 78
+        },
+        "web/src/constant/comfyui.ts": {
+          "additions": 7,
+          "accepted_lines": 5
+        },
+        "web/vite.config.ts": {
+          "additions": 12
+        },
+        "web/scripts/test-h3-live.ts": {
+          "additions": 70,
+          "deletions": 6,
+          "accepted_lines": 53
+        },
+        "web/src/stores/use-config-store.ts": {
+          "additions": 10,
+          "deletions": 4,
+          "accepted_lines": 5
+        },
+        "CHANGELOG.md": {
+          "additions": 2,
+          "accepted_lines": 1
+        },
+        "web/src/pages/video/index.tsx": {
+          "additions": 5,
+          "deletions": 5,
+          "accepted_lines": 5
+        },
+        "web/src/services/api/comfyui-h3-workflow.ts": {
+          "additions": 76,
+          "accepted_lines": 42
+        },
+        "web/src/pages/canvas/project.tsx": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 1
+        },
+        "docs/plans/comfyui-readonly-evidence.json": {
+          "additions": 122,
+          "accepted_lines": 122
+        },
+        "web/src/i18n/locales/en-US.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "web/scripts/comfyui-h3.test.ts": {
+          "additions": 44,
+          "accepted_lines": 39
+        },
+        "docs/content/docs/progress/todo.mdx": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "docs/plans/comfyui-h3-usage.md": {
+          "additions": 58,
+          "deletions": 3,
+          "accepted_lines": 52
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 2
+        }
+      }
+    },
+    "2f3cf42aed675676": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "rollout-2026-09-09T14-48-13-01a084ec-9a0d-7551-b2f7-f8ffe2e501df",
+        "model": "unknown"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 54,
+      "total_deletions": 57,
+      "accepted_lines": 43,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "web/src/constant/comfyui.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "web/src/pages/canvas/project.tsx": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "web/src/services/api/video.ts": {
+          "additions": 1,
+          "deletions": 1
+        },
+        "web/vite.config.ts": {
+          "additions": 3,
+          "deletions": 3
+        },
+        "web/src/pages/video/index.tsx": {
+          "additions": 30,
+          "deletions": 38,
+          "accepted_lines": 30
+        },
+        "docs/plans/comfyui-integration-plan.md": {
+          "additions": 4,
+          "deletions": 4
+        },
+        "web/src/services/api/comfyui-h3.ts": {
+          "additions": 4,
+          "deletions": 3,
+          "accepted_lines": 1
+        },
+        "web/scripts/test-h3-live.ts": {
+          "additions": 9,
+          "deletions": 6,
+          "accepted_lines": 9
+        }
+      }
+    },
+    "69b01347cd1bacf2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0ad7e-4dfc-7582-855a-d8716e59be56",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 378,
+      "total_deletions": 83,
+      "accepted_lines": 335,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "web/src/components/canvas/canvas-config-node-panel.tsx": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "web/src/lib/canvas/canvas-generation-helpers.ts": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "CHANGELOG.md": {
+          "additions": 15,
+          "deletions": 4,
+          "accepted_lines": 12
+        },
+        "docs/plans/comfyui-integration-plan.md": {
+          "additions": 157,
+          "accepted_lines": 157
+        },
+        "web/src/services/api/comfyui-h3.ts": {
+          "additions": 2,
+          "deletions": 2
+        },
+        "web/src/services/api/comfyui-h3-workflow.ts": {
+          "additions": 11,
+          "deletions": 2
+        },
+        "web/src/stores/use-config-store.ts": {
+          "additions": 7,
+          "deletions": 1
+        },
+        "web/src/types/canvas.ts": {
+          "additions": 3
+        },
+        "web/src/components/canvas/canvas-video-settings-popover.tsx": {
+          "additions": 10,
+          "deletions": 4,
+          "accepted_lines": 10
+        },
+        "docs/plans/upstream-v0.19.0-review.md": {
+          "additions": 61,
+          "accepted_lines": 61
+        },
+        "web/src/services/api/video.ts": {
+          "additions": 8,
+          "deletions": 2
+        },
+        "web/src/i18n/locales/zh-CN.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 5,
+          "deletions": 3,
+          "accepted_lines": 2
+        },
+        "web/src/pages/canvas/project.tsx": {
+          "additions": 72,
+          "deletions": 50,
+          "accepted_lines": 72
+        },
+        "web/src/constant/comfyui.ts": {
+          "additions": 2
+        },
+        "web/src/pages/video/index.tsx": {
+          "additions": 12,
+          "deletions": 11,
+          "accepted_lines": 8
+        },
+        "web/src/components/canvas/canvas-node-prompt-panel.tsx": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "web/src/i18n/locales/en-US.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        }
+      }
+    },
+    "8dc964cd1d5299ba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "58d3c70d-1ee7-49f3-8f36-6e3631639a37",
+        "model": "<synthetic>"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 1036,
+      "total_deletions": 410,
+      "accepted_lines": 716,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "web/src/pages/video/index.tsx": {
+          "additions": 10,
+          "accepted_lines": 10
+        },
+        "web/src/i18n/locales/en-US.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "web/src/components/video-settings-panel.tsx": {
+          "additions": 36,
+          "deletions": 14,
+          "accepted_lines": 32
+        },
+        "web/vite.config.ts": {
+          "additions": 30,
+          "deletions": 24,
+          "accepted_lines": 30
+        },
+        "web/scripts/test-h3-live.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "web/src/lib/canvas/canvas-generation-helpers.ts": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "docs/plans/h3-x2-decode-node.py": {
+          "additions": 217,
+          "accepted_lines": 217
+        },
+        "web/src/components/canvas/canvas-node-prompt-panel.tsx": {
+          "additions": 26,
+          "accepted_lines": 26
+        },
+        "web/src/services/api/video.ts": {
+          "additions": 78,
+          "deletions": 43,
+          "accepted_lines": 43
+        },
+        "docs/content/docs/progress/todo.mdx": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "web/src/services/api/comfyui-h3-workflow.ts": {
+          "additions": 327,
+          "deletions": 179,
+          "accepted_lines": 183
+        },
+        "web/src/i18n/locales/zh-CN.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "web/.env.local": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "web/src/pages/canvas/project.tsx": {
+          "additions": 4,
+          "accepted_lines": 4
+        },
+        "CHANGELOG.md": {
+          "additions": 14,
+          "deletions": 5,
+          "accepted_lines": 9
+        },
+        "docs/plans/h3-acceleration-summary.md": {
+          "additions": 239,
+          "deletions": 120,
+          "accepted_lines": 119
+        },
+        "web/src/constant/comfyui.ts": {
+          "additions": 15,
+          "deletions": 1,
+          "accepted_lines": 15
+        },
+        "web/src/stores/use-config-store.ts": {
+          "additions": 13,
+          "deletions": 8,
+          "accepted_lines": 10
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 14,
+          "deletions": 7,
+          "accepted_lines": 7
+        },
+        "web/src/services/api/comfyui-h3.ts": {
+          "additions": 5,
+          "deletions": 5,
+          "accepted_lines": 3
+        }
+      }
+    },
+    "a48d4e9e88fa1390": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "rollout-2026-09-17T11-52-11-01a0ad7e-4dfc-7582-855a-d8716e59be56",
+        "model": "unknown"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 169,
+      "total_deletions": 26,
+      "accepted_lines": 152,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "docs/content/docs/progress/todo.mdx": {
+          "additions": 5,
+          "accepted_lines": 5
+        },
+        "web/src/stores/use-config-store.ts": {
+          "additions": 7,
+          "deletions": 1,
+          "accepted_lines": 6
+        },
+        "web/src/services/api/comfyui-h3-workflow.ts": {
+          "additions": 11,
+          "deletions": 2,
+          "accepted_lines": 8
+        },
+        "web/src/services/api/comfyui-h3.ts": {
+          "additions": 2,
+          "deletions": 2
+        },
+        "web/src/types/canvas.ts": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "web/src/pages/video/index.tsx": {
+          "additions": 12,
+          "deletions": 3,
+          "accepted_lines": 11
+        },
+        "web/src/constant/comfyui.ts": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "web/src/pages/canvas/project.tsx": {
+          "additions": 12,
+          "accepted_lines": 12
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 5,
+          "deletions": 1,
+          "accepted_lines": 4
+        },
+        "docs/plans/comfyui-h3-usage.md": {
+          "additions": 22,
+          "deletions": 3,
+          "accepted_lines": 22
+        },
+        "web/src/services/api/video.ts": {
+          "additions": 11,
+          "deletions": 4,
+          "accepted_lines": 9
+        },
+        "web/src/components/video-settings-panel.tsx": {
+          "additions": 46,
+          "deletions": 5,
+          "accepted_lines": 39
+        },
+        "web/scripts/comfyui-h3.test.ts": {
+          "additions": 27,
+          "deletions": 5,
+          "accepted_lines": 27
+        },
+        "CHANGELOG.md": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "docs/index.md": {
+          "additions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}
