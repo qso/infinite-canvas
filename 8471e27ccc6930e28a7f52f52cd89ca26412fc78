@@ -1,0 +1,83 @@
+web/src/services/api/comfyui-qwen.ts
+  e5cfb1f30ccea66b 1-167
+web/src/components/canvas/canvas-image-settings-popover.tsx
+  e5cfb1f30ccea66b 8,34,70
+docs/content/docs/progress/pending-test.mdx
+  e5cfb1f30ccea66b 10-11
+CHANGELOG.md
+  e5cfb1f30ccea66b 5
+web/src/stores/use-config-store.ts
+  e5cfb1f30ccea66b 7,58-62,136-140,183,201,225-226,235,306-310,442,456
+web/src/constant/comfyui.ts
+  e5cfb1f30ccea66b 3,8-9,20-22
+web/src/components/image-settings-panel.tsx
+  e5cfb1f30ccea66b 2-3,7,20-25,31,34,44,46,54,62,77-91,93,96,99,101,107,109,111,115-118,141-150,152,154-200,259-291,295,297,361-362
+web/src/services/api/comfyui-qwen-workflow.ts
+  e5cfb1f30ccea66b 1-86
+web/src/services/api/image.ts
+  e5cfb1f30ccea66b 4,6,699-705,766-772
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "8471e27ccc6930e28a7f52f52cd89ca26412fc78",
+  "prompts": {
+    "e5cfb1f30ccea66b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "260e4db0-d0fa-4bed-a583-60f9fc15b254",
+        "model": "<synthetic>"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 461,
+      "total_deletions": 56,
+      "accepted_lines": 445,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "web/src/components/image-settings-panel.tsx": {
+          "additions": 140,
+          "deletions": 36,
+          "accepted_lines": 139
+        },
+        "web/src/services/api/comfyui-qwen.ts": {
+          "additions": 173,
+          "deletions": 6,
+          "accepted_lines": 167
+        },
+        "web/src/components/canvas/canvas-image-settings-popover.tsx": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 3
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "web/src/services/api/image.ts": {
+          "additions": 16,
+          "accepted_lines": 16
+        },
+        "web/src/services/api/comfyui-qwen-workflow.ts": {
+          "additions": 94,
+          "deletions": 8,
+          "accepted_lines": 86
+        },
+        "CHANGELOG.md": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "web/src/stores/use-config-store.ts": {
+          "additions": 23,
+          "deletions": 4,
+          "accepted_lines": 23
+        },
+        "web/src/constant/comfyui.ts": {
+          "additions": 8,
+          "accepted_lines": 8
+        }
+      }
+    }
+  }
+}
