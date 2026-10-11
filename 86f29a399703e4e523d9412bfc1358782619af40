@@ -1,0 +1,57 @@
+web/src/services/api/comfyui-qwen-workflow.ts
+  e5cfb1f30ccea66b 7,18-19,30-33,69-70,81-99,114
+CHANGELOG.md
+  e5cfb1f30ccea66b 5
+web/src/components/image-settings-panel.tsx
+  e5cfb1f30ccea66b 9,24,58-71,126,130-132,159,167
+docs/content/docs/progress/pending-test.mdx
+  e5cfb1f30ccea66b 10
+web/src/services/api/comfyui-qwen.ts
+  e5cfb1f30ccea66b 36,44-45,48-50,127,132,136-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "86f29a399703e4e523d9412bfc1358782619af40",
+  "prompts": {
+    "e5cfb1f30ccea66b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "260e4db0-d0fa-4bed-a583-60f9fc15b254",
+        "model": "<synthetic>"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 75,
+      "total_deletions": 13,
+      "accepted_lines": 75,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "web/src/services/api/comfyui-qwen-workflow.ts": {
+          "additions": 31,
+          "deletions": 2,
+          "accepted_lines": 31
+        },
+        "web/src/services/api/comfyui-qwen.ts": {
+          "additions": 20,
+          "deletions": 3,
+          "accepted_lines": 20
+        },
+        "web/src/components/image-settings-panel.tsx": {
+          "additions": 22,
+          "deletions": 7,
+          "accepted_lines": 22
+        },
+        "CHANGELOG.md": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}
