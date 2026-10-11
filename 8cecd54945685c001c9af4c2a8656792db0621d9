@@ -1,0 +1,144 @@
+web/src/components/layout/config-local-storage.tsx
+  eb358895d9614f99 43,68,70-76,78,124-125
+web/pnpm-workspace.yaml
+  eb358895d9614f99 1-2
+web/src/components/layout/app-config-modal.tsx
+  eb358895d9614f99 1,8,18,72,248-253,272-289
+web/src/services/api/image.ts
+  eb358895d9614f99 100,115,123-124,126,130-131,168,176,185,200-201,204-205,700,709,725,761,771,788
+web/src/services/api/model-plugin.ts
+  eb358895d9614f99 239,328,332-334,342-345,351,374-382,384
+web/src/components/canvas/nodes/builtin-nodes.tsx
+  eb358895d9614f99 20
+README.md
+  eb358895d9614f99 37-42,61,64-69,72,74,77,91-101
+web/src/lib/canvas/canvas-node-geometry.ts
+  eb358895d9614f99 1,152-175
+web/src/services/api/video.ts
+  eb358895d9614f99 206,212-214,220-227,229-232
+web/tests/canvas-focus-viewport.test.ts
+  eb358895d9614f99 1-60
+VERSION
+  eb358895d9614f99 1
+web/src/stores/use-canvas-side-panel-store.ts
+  eb358895d9614f99 10,12,26-28,36,38,49,51-54
+web/src/components/canvas/canvas-node.tsx
+  eb358895d9614f99 449-454
+web/tests/model-selection.test.ts
+  eb358895d9614f99 1-100
+web/src/components/image-settings-panel.tsx
+  eb358895d9614f99 13-16,68,166
+web/src/services/local-storage-usage.ts
+  eb358895d9614f99 3,6-16
+docs/content/docs/progress/pending-test.zh-CN.mdx
+  eb358895d9614f99 8-9,131-132
+web/src/components/canvas/canvas-node-hover-toolbar.tsx
+  eb358895d9614f99 193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "8cecd54945685c001c9af4c2a8656792db0621d9",
+  "prompts": {
+    "eb358895d9614f99": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "225dd70b-0741-4b83-962f-5802ec750646",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 361,
+      "total_deletions": 109,
+      "accepted_lines": 361,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "web/src/services/api/image.ts": {
+          "additions": 20,
+          "deletions": 52,
+          "accepted_lines": 20
+        },
+        "web/src/components/layout/app-config-modal.tsx": {
+          "additions": 28,
+          "deletions": 1,
+          "accepted_lines": 28
+        },
+        "VERSION": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "docs/content/docs/progress/pending-test.zh-CN.mdx": {
+          "additions": 4,
+          "deletions": 1,
+          "accepted_lines": 4
+        },
+        "web/src/services/api/model-plugin.ts": {
+          "additions": 20,
+          "deletions": 22,
+          "accepted_lines": 20
+        },
+        "web/src/services/local-storage-usage.ts": {
+          "additions": 12,
+          "deletions": 3,
+          "accepted_lines": 12
+        },
+        "README.md": {
+          "additions": 31,
+          "deletions": 10,
+          "accepted_lines": 31
+        },
+        "web/tests/model-selection.test.ts": {
+          "additions": 100,
+          "accepted_lines": 100
+        },
+        "web/pnpm-workspace.yaml": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "web/src/components/image-settings-panel.tsx": {
+          "additions": 6,
+          "deletions": 4,
+          "accepted_lines": 6
+        },
+        "web/tests/canvas-focus-viewport.test.ts": {
+          "additions": 60,
+          "accepted_lines": 60
+        },
+        "web/src/components/canvas/nodes/builtin-nodes.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "web/src/stores/use-canvas-side-panel-store.ts": {
+          "additions": 15,
+          "accepted_lines": 15
+        },
+        "web/src/components/layout/config-local-storage.tsx": {
+          "additions": 12,
+          "deletions": 9,
+          "accepted_lines": 12
+        },
+        "web/src/components/canvas/canvas-node.tsx": {
+          "additions": 6,
+          "deletions": 1,
+          "accepted_lines": 6
+        },
+        "web/src/lib/canvas/canvas-node-geometry.ts": {
+          "additions": 26,
+          "deletions": 1,
+          "accepted_lines": 26
+        },
+        "web/src/components/canvas/canvas-node-hover-toolbar.tsx": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "web/src/services/api/video.ts": {
+          "additions": 16,
+          "deletions": 3,
+          "accepted_lines": 16
+        }
+      }
+    }
+  }
+}
