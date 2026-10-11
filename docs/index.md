@@ -15,7 +15,7 @@
 
 ## Development and Data
 
-- [Local Development](/docs/development/local-development)
+- [Local Development / 云端 YuE2 音乐环境](/docs/development/local-development)
 - [Canvas Data Structure](/docs/development/canvas-data-structure)
 - [How the Local Codex Connection Works](/docs/development/local-codex-canvas)
 

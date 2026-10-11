@@ -1,4 +1,5 @@
 import i18n from "@/i18n";
+import { DEFAULT_MUSIC_DRAFT, MUSIC_MODEL } from "@/constant/music";
 import { CanvasNodeType } from "@/types/canvas";
 import type { CanvasNodeMetadata } from "@/types/canvas";
 import { getNodeSpec as getRegistryNodeSpec } from "@/lib/canvas/node-registry";
@@ -16,6 +17,7 @@ export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.Config]: { width: 340, height: 240, get title() { return i18n.t("canvas.nodeTypes.config"); } },
     [CanvasNodeType.Video]: { width: 420, height: 236, get title() { return i18n.t("canvas.nodeTypes.video"); } },
     [CanvasNodeType.Audio]: { width: 340, height: 120, get title() { return i18n.t("canvas.nodeTypes.audio"); } },
+    [CanvasNodeType.Music]: { width: 340, height: 160, get title() { return i18n.t("canvas.nodeTypes.music"); } },
     [CanvasNodeType.Group]: { width: 760, height: 480, get title() { return i18n.t("canvas.nodeTypes.group"); } },
 } satisfies Record<CanvasNodeType, { width: number; height: number; title: string }>;
 
@@ -39,6 +41,10 @@ export const NODE_SPECS = {
     [CanvasNodeType.Audio]: {
         width: 340, height: 120, get title() { return NODE_DEFAULT_SIZE[CanvasNodeType.Audio].title; },
         metadata: { content: "", status: "idle" },
+    },
+    [CanvasNodeType.Music]: {
+        width: 340, height: 160, get title() { return NODE_DEFAULT_SIZE[CanvasNodeType.Music].title; },
+        metadata: { content: "", status: "idle", model: MUSIC_MODEL, musicDraft: DEFAULT_MUSIC_DRAFT },
     },
     [CanvasNodeType.Group]: {
         width: 760, height: 480, get title() { return NODE_DEFAULT_SIZE[CanvasNodeType.Group].title; },

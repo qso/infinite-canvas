@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Group, Video } from "lucide-react";
@@ -7,10 +8,12 @@ import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
+import { createMusicAnalysis, createMusicGenerationTask, getMusicGenerationContent, getMusicGenerationScore, MusicApiError, uploadMusicReference, waitForMusicAnalysis, waitForMusicGenerationTask } from "@/services/api/music";
+import { MUSIC_ENDPOINT, MUSIC_MODEL, type MusicAnalysisRequest } from "@/constant/music";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { ensureImagePreview, uploadImage } from "@/services/image-storage";
-import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { deleteStoredMedia, getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
@@ -31,19 +34,20 @@ import { CanvasNodeCropDialog, type CanvasImageCropRect } from "@/components/can
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "@/components/canvas/canvas-node-mask-edit-dialog";
 import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "@/components/canvas/canvas-node-split-dialog";
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
-import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
+import { buildMusicLyrics, isMusicReferenceNode, musicAudioReferences, buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "@/components/canvas/canvas-node-hover-toolbar";
 import { CanvasSelectionToolbar } from "@/components/canvas/canvas-selection-toolbar";
 import { InfiniteCanvas } from "@/components/canvas/infinite-canvas";
 import { Minimap } from "@/components/canvas/canvas-mini-map";
 import { CanvasNode } from "@/components/canvas/canvas-node";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
+import { CanvasMusicNodePanel } from "@/components/canvas/canvas-music-node-panel";
 import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { CanvasSidePanel } from "@/components/canvas/canvas-side-panel";
 import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { useAgentStore } from "@/stores/use-agent-store";
-import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useAgentBridge } from "@/pages/canvas/hooks/use-agent-bridge";
 import { usePluginHost } from "@/pages/canvas/hooks/use-plugin-host";
 import { buildNodeMentionReferences, getGroupResourceNodes, isCanvasReferenceNode, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -55,16 +59,22 @@ import {
     buildAngleLabel,
     buildAnglePrompt,
     buildGenerationConfig,
+    buildMusicGenerationRequest,
     findRetrySourceNode,
     generationReferenceUrls,
     getGenerationCount,
     getInputSummary,
     hasResumableVideoTask,
+    hasResumableMusicTask,
     hydrateAssistantImages,
     hydrateCanvasImages,
     imageExtension,
     isAudioFile,
     isGenerationCanceled,
+    musicDraftFromRequest,
+    readMusicDraft,
+    readMusicReferenceAnalysis,
+    selectMusicReference,
     resetInterruptedGeneration,
     resolveMetadataReferences,
     sourceNodeReferenceImages,
@@ -119,6 +129,7 @@ type CanvasGenerationRequest = {
     originNodeId: string;
     runningNodeId: string;
     controller: AbortController;
+    kind?: "music";
 };
 
 const VIDEO_NODE_MAX_WIDTH = 420;
@@ -164,6 +175,8 @@ function InfiniteCanvasPage() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const projectId = params.id || "";
+    const activeProjectIdRef = useRef(projectId);
+    activeProjectIdRef.current = projectId;
     const localAgentConnected = useAgentStore((state) => state.connected);
     const localAgentActivity = useAgentStore((state) => state.activity);
     const localAgentEnabled = useAgentStore((state) => state.enabled);
@@ -305,6 +318,318 @@ function InfiniteCanvasPage() {
         if (request?.controller === controller) generationRequestsRef.current.delete(targetNodeId);
     }, []);
 
+    const updateMusicNode = useCallback((nodeId: string, patch: Partial<CanvasNodeMetadata>) => {
+        if (activeProjectIdRef.current !== projectId) return;
+        // Commit before reading the snapshot, preserving other queued node updates.
+        let changed = false;
+        flushSync(() => setNodes((prev) => {
+            const next = prev.map((node) => {
+                if (node.id !== nodeId || node.type !== CanvasNodeType.Music || Object.entries(patch).every(([key, value]) => node.metadata?.[key as keyof CanvasNodeMetadata] === value)) return node;
+                changed = true;
+                return { ...node, metadata: { ...node.metadata, ...patch } };
+            });
+            return changed ? next : prev;
+        }));
+        if (changed) updateProject(projectId, { nodes: nodesRef.current });
+    }, [projectId, updateProject]);
+
+    const selectedMusicReference = useCallback((node: CanvasNodeData) => selectMusicReference(node, musicAudioReferences(node.id, nodesRef.current, connectionsRef.current)), []);
+
+    const analyzeMusicReference = useCallback(async (nodeId: string, extractLyrics = false, resume = false) => {
+        const node = nodesRef.current.find((item) => item.id === nodeId);
+        if (node?.type !== CanvasNodeType.Music || generationRequestsRef.current.has(nodeId)) return;
+        const reference = selectedMusicReference(node);
+        if (!resume && !reference) {
+            message.warning(t("canvas.music.referenceRequired"));
+            return;
+        }
+        const referenceKey = reference?.metadata?.storageKey || reference?.metadata?.content;
+        const sameReference = !!reference && node.metadata?.musicAnalysisNodeId === reference.id && node.metadata.musicAnalysisStorageKey === referenceKey;
+        const controller = startGenerationRequest(nodeId, nodeId);
+        generationRequestsRef.current.get(nodeId)!.kind = "music";
+        const assertActive = (analysisId?: string) => {
+            controller.signal.throwIfAborted();
+            const current = nodesRef.current.find((item) => item.id === nodeId);
+            if (activeProjectIdRef.current !== projectId || generationRequestsRef.current.get(nodeId)?.controller !== controller || current?.type !== CanvasNodeType.Music || (analysisId && current.metadata?.musicAnalysisId !== analysisId)) throw new DOMException("Aborted", "AbortError");
+        };
+        updateMusicNode(nodeId, { status: NODE_STATUS_LOADING, musicError: undefined, errorDetails: undefined });
+        try {
+            let request = resume ? node.metadata?.musicAnalysisRequest : undefined;
+            if (resume && (!request || request.id !== node.metadata?.musicAnalysisId)) throw new Error(t("canvas.music.requestMissing"));
+            if (!request) {
+                const draft = readMusicDraft(node.metadata);
+                const mode = draft.creationMode || "original";
+                const previous = sameReference ? node.metadata?.musicAnalysisRequest : undefined;
+                let audioId = reference?.metadata?.musicAudioStorageKey === referenceKey ? reference?.metadata?.musicAudioId || null : null;
+                const taskId = reference?.type === CanvasNodeType.Music && reference.metadata?.musicTaskEndpoint === MUSIC_ENDPOINT && reference.metadata.musicTaskStatus === "completed" && !reference.metadata.musicContentUnavailable ? reference.metadata.musicTaskId || null : null;
+                if (!taskId && !audioId) {
+                    const blob = reference?.metadata?.storageKey ? await getMediaBlob(reference.metadata.storageKey) : reference?.metadata?.content ? await (await fetch(reference.metadata.content, { signal: controller.signal })).blob() : null;
+                    assertActive();
+                    if (!blob) throw new Error(t("canvas.music.referenceRequired"));
+                    audioId = (await uploadMusicReference(blob, { signal: controller.signal })).id;
+                    assertActive();
+                    flushSync(() => setNodes((prev) => prev.map((item) => item.id === reference?.id && (item.metadata?.storageKey || item.metadata?.content) === referenceKey ? { ...item, metadata: { ...item.metadata, musicAudioId: audioId!, musicAudioStorageKey: referenceKey } } : item)));
+                }
+                request = { id: crypto.randomUUID(), source: { audio_id: taskId ? null : audioId, music_task_id: taskId }, score: mode === "melody" || mode === "full" || !!previous?.score, style: mode === "style" || !!previous?.style, lyrics: extractLyrics || (draft.outputType !== "instrumental" && !!previous?.lyrics) };
+                const current = nodesRef.current.find((item) => item.id === nodeId)!;
+                updateMusicNode(nodeId, {
+                    musicAnalysisId: request.id, musicAnalysisRequest: request, musicAnalysisStatus: "queued", musicAnalysisStage: "queued",
+                    musicAnalysisNodeId: reference?.id, musicAnalysisStorageKey: referenceKey, musicAnalysisMissing: false, musicAnalysis: undefined,
+                    musicDraft: { ...readMusicDraft(current.metadata), referenceNodeId: reference?.id, ...(!sameReference && node.metadata?.musicAnalysisNodeId ? { abc: "" } : {}) },
+                    ...(!sameReference ? { musicReferenceStyle: undefined } : {}),
+                });
+                await flushCanvasPersistence();
+                assertActive(request.id);
+                await createMusicAnalysis(request, { signal: controller.signal });
+            }
+            const analysisRequest = request;
+            const task = await waitForMusicAnalysis(analysisRequest.id, { signal: controller.signal, onTask: (current) => {
+                assertActive(analysisRequest.id);
+                if (current.request.source.audio_id !== analysisRequest.source.audio_id || current.request.source.music_task_id !== analysisRequest.source.music_task_id || (["score", "style", "lyrics"] as const).some((key) => current.request[key] !== analysisRequest[key])) throw new Error(t("canvas.music.taskMismatch"));
+                updateMusicNode(nodeId, { musicAnalysisStatus: current.status, musicAnalysisStage: current.stage });
+            } });
+            assertActive(analysisRequest.id);
+            if (task.status === "failed" || !task.result) throw new Error(task.error || t("canvas.music.analysisFailed"));
+            const current = nodesRef.current.find((item) => item.id === nodeId)!;
+            updateMusicNode(nodeId, { musicAnalysis: task.result, musicAnalysisStatus: "completed", musicAnalysisStage: "analysis_completed", musicAnalysisMissing: false, musicReferenceStyle: current.metadata?.musicReferenceStyle ?? task.result.style ?? undefined, status: current.metadata?.content ? NODE_STATUS_SUCCESS : NODE_STATUS_IDLE });
+            await flushCanvasPersistence();
+        } catch (error) {
+            if (isGenerationCanceled(error) || controller.signal.aborted || activeProjectIdRef.current !== projectId) return;
+            const detail = error instanceof Error ? error.message : t("canvas.music.analysisFailed");
+            const current = nodesRef.current.find((item) => item.id === nodeId);
+            if (current?.type !== CanvasNodeType.Music) return;
+            updateMusicNode(nodeId, { status: current.metadata?.content ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, musicError: detail, errorDetails: detail, ...(error instanceof MusicApiError && error.status === 404 ? { musicAnalysisMissing: true, musicAnalysisStatus: "failed", musicAnalysisStage: "failed" } : {}) });
+            message.error(detail);
+        } finally {
+            finishGenerationRequest(nodeId, controller);
+        }
+    }, [finishGenerationRequest, message, projectId, selectedMusicReference, startGenerationRequest, t, updateMusicNode]);
+
+    const runMusicNodeTask = useCallback(async (nodeId: string, submit = false, originNodeId = nodeId) => {
+        const node = nodesRef.current.find((item) => item.id === nodeId);
+        const taskId = node?.metadata?.musicTaskId;
+        const request = node?.metadata?.musicRequest;
+        if (node?.type !== CanvasNodeType.Music || !taskId || node.metadata?.content || node.metadata?.musicContentUnavailable || generationRequestsRef.current.has(nodeId)) return;
+        if (node.metadata?.musicTaskEndpoint !== MUSIC_ENDPOINT) {
+            message.error(t("canvas.music.endpointMismatch"));
+            return;
+        }
+        if (submit && (!request || request.id !== taskId || request.model !== MUSIC_MODEL)) {
+            message.error(t("canvas.music.requestMissing"));
+            return;
+        }
+        const controller = startGenerationRequest(nodeId, originNodeId, nodeId);
+        generationRequestsRef.current.get(nodeId)!.kind = "music";
+        const assertActive = () => {
+            const current = nodesRef.current.find((item) => item.id === nodeId);
+            if (activeProjectIdRef.current !== projectId || controller.signal.aborted || generationRequestsRef.current.get(nodeId)?.controller !== controller || current?.type !== CanvasNodeType.Music || current.metadata?.musicTaskId !== taskId) throw new DOMException("Aborted", "AbortError");
+        };
+        let phase = submit ? "persist" : "query";
+        let uploaded: UploadedFile | undefined;
+        let attached = false;
+        setRunningNodeId(nodeId);
+        updateMusicNode(nodeId, { status: NODE_STATUS_LOADING, errorDetails: undefined, musicError: undefined });
+        const recordTask = (task: Awaited<ReturnType<typeof createMusicGenerationTask>>) => {
+            assertActive();
+            if (task.id !== taskId || task.request.id !== taskId || task.request.model !== MUSIC_MODEL || (request && Object.entries(request).some(([key, value]) => JSON.stringify(task.request[key as keyof typeof task.request]) !== JSON.stringify(value)))) throw new Error(t("canvas.music.taskMismatch"));
+            updateMusicNode(nodeId, {
+                musicRequest: request || Object.freeze({ ...task.request }),
+                musicTaskStatus: task.status,
+                musicTaskStage: task.stage,
+                musicTaskMissing: false,
+                musicSeed: task.seed,
+                musicOutput: task.output || undefined,
+                ...(task.status === "failed" ? { status: NODE_STATUS_ERROR, errorDetails: task.error || t("canvas.music.failed"), musicError: task.error || t("canvas.music.failed") } : {}),
+            });
+        };
+        try {
+            let task: Awaited<ReturnType<typeof createMusicGenerationTask>>;
+            if (submit) {
+                // updateProject is synchronous; flush awaits the actual IndexedDB write, not React or the debounce timer.
+                await flushCanvasPersistence();
+                assertActive();
+                phase = "request";
+                const created = await createMusicGenerationTask(request!, { signal: controller.signal });
+                recordTask(created);
+                phase = "persist";
+                await flushCanvasPersistence();
+                assertActive();
+                phase = "query";
+                task = created.status === "completed" || created.status === "failed" ? created : await waitForMusicGenerationTask(taskId, { signal: controller.signal, onTask: recordTask });
+            } else {
+                task = await waitForMusicGenerationTask(taskId, { signal: controller.signal, onTask: recordTask });
+            }
+            assertActive();
+            if (task.status === "failed") throw new Error(task.error || t("canvas.music.failed"));
+            phase = "persist";
+            await flushCanvasPersistence();
+            assertActive();
+            const output = task.output;
+            if (!output || !/^audio\/(?:x-)?(?:wav|wave|flac)$/i.test(output.mime_type)) throw new Error(t("canvas.music.invalidOutput"));
+            phase = "download";
+            const blob = await getMusicGenerationContent(taskId, { signal: controller.signal });
+            assertActive();
+            if (blob.type && blob.type !== "application/octet-stream" && (!/^audio\/(?:x-)?(?:wav|wave|flac)$/i.test(blob.type) || audioExtension(blob.type) !== audioExtension(output.mime_type))) throw new Error(t("canvas.music.invalidOutput"));
+            if (blob.size !== output.bytes) throw new Error(t("canvas.music.invalidOutput"));
+            const audioBlob = blob.type === output.mime_type ? blob : new Blob([blob], { type: output.mime_type });
+            phase = "store";
+            assertActive();
+            uploaded = await uploadMediaFile(audioBlob, "audio");
+            assertActive();
+            updateMusicNode(nodeId, { ...audioMetadata(uploaded), durationMs: output.duration_ms, musicOutput: output, musicSeed: task.seed, musicSavePending: false, status: NODE_STATUS_SUCCESS, errorDetails: undefined, musicError: undefined });
+            attached = true;
+            phase = "save";
+            await flushCanvasPersistence();
+        } catch (error) {
+            if (!attached && uploaded) await deleteStoredMedia([uploaded.storageKey]).catch(() => {});
+            if (isGenerationCanceled(error) || controller.signal.aborted || activeProjectIdRef.current !== projectId) return;
+            const current = nodesRef.current.find((item) => item.id === nodeId);
+            if (generationRequestsRef.current.get(nodeId)?.controller !== controller || current?.metadata?.musicTaskId !== taskId) return;
+            const detail = error instanceof Error ? error.message : t("canvas.music.failed");
+            const missingTask = phase === "query" && error instanceof MusicApiError && error.status === 404;
+            const contentUnavailable = phase === "download" && error instanceof MusicApiError && error.status === 410;
+            const errorDetails = phase === "store" || phase === "save" ? `${t("canvas.music.saveOutputFailed")} ${detail}` : phase === "persist" ? `${t("canvas.music.persistenceFailed")} ${detail}` : missingTask ? t("canvas.music.taskNotFound") : detail;
+            updateMusicNode(nodeId, { status: current.metadata?.content ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails, musicError: errorDetails, ...(phase === "save" ? { musicSavePending: true } : {}), ...(contentUnavailable ? { musicContentUnavailable: true } : {}), ...(missingTask ? { musicTaskMissing: true } : {}) });
+            message.error(errorDetails);
+        } finally {
+            finishGenerationRequest(nodeId, controller);
+            if (activeProjectIdRef.current === projectId) setRunningNodeId((current) => current === nodeId ? null : current);
+        }
+    }, [finishGenerationRequest, message, projectId, startGenerationRequest, t, updateMusicNode]);
+
+    const handleGenerateMusic = useCallback(async (nodeId: string) => {
+        const source = nodesRef.current.find((node) => node.id === nodeId);
+        if (source?.type !== CanvasNodeType.Music || [...generationRequestsRef.current.values()].some((request) => request.kind === "music" && (request.originNodeId === nodeId || request.targetNodeId === nodeId))) return;
+        if (source.metadata?.musicSavePending) {
+            message.warning(t("canvas.music.saveBeforeNext"));
+            return;
+        }
+        if (hasResumableMusicTask(source)) {
+            await runMusicNodeTask(nodeId);
+            return;
+        }
+        try {
+            const draft = readMusicDraft(source.metadata);
+            const mode = draft.creationMode || "original";
+            const outputType = draft.outputType || "song";
+            const reference = selectedMusicReference(source);
+            const analysis = readMusicReferenceAnalysis(source, reference);
+            const caption = source.metadata?.musicReferenceStyle ?? analysis?.style ?? "";
+            if (mode !== "original" && (!analysis || (mode === "style" ? !analysis.style?.trim() || !caption.trim() : !(draft.abc.trim() || (mode === "melody" ? analysis.abc_melody?.trim() : analysis.abc_full?.trim()))))) {
+                message.warning(t("canvas.music.analyzeFirst"));
+                return;
+            }
+            const inheritedLyrics = analysis?.lyrics || (mode !== "original" ? analysis?.source_lyrics || reference?.metadata?.musicRequest?.lyrics || "" : "");
+            const request = Object.freeze({ ...buildMusicGenerationRequest(crypto.randomUUID(), { ...draft, style: mode === "style" && !draft.style.trim() ? caption : draft.style, cot: mode === "melody" || mode === "full" ? mode : draft.cot, abc: mode === "style" ? "" : draft.abc }, buildMusicLyrics(nodeId, nodesRef.current, connectionsRef.current) || inheritedLyrics), ...(mode !== "original" ? { reference: { analysis_id: source.metadata!.musicAnalysisId!, mode, style_override: mode === "style" ? caption : null } } : {}) });
+            const metadata: CanvasNodeMetadata = {
+                musicAnalysisId: analysis ? source.metadata?.musicAnalysisId : undefined,
+                musicAnalysis: analysis,
+                musicAnalysisStatus: analysis ? "completed" : undefined,
+                musicAnalysisStage: analysis ? "analysis_completed" : undefined,
+                musicAnalysisRequest: analysis ? source.metadata?.musicAnalysisRequest : undefined,
+                musicAnalysisNodeId: analysis ? reference?.id : undefined,
+                musicAnalysisStorageKey: analysis ? source.metadata?.musicAnalysisStorageKey : undefined,
+                musicReferenceStyle: analysis ? source.metadata?.musicReferenceStyle : undefined,
+                model: MUSIC_MODEL,
+                musicDraft: { ...musicDraftFromRequest(request), style: draft.style, ...(outputType === "instrumental" ? { lyrics: draft.lyrics, cot: draft.cot, abc: draft.abc } : {}), creationMode: mode, referenceNodeId: reference?.id },
+                musicRequest: request,
+                musicTaskId: request.id,
+                musicTaskEndpoint: MUSIC_ENDPOINT,
+                musicTaskStatus: "queued",
+                musicTaskStage: "queued",
+                musicTaskMissing: false,
+                musicSeed: undefined,
+                musicOutput: undefined,
+                musicScore: undefined,
+                musicError: undefined,
+                musicSavePending: false,
+                musicContentUnavailable: false,
+                status: NODE_STATUS_LOADING,
+                errorDetails: undefined,
+                ...((source.metadata?.musicTaskStatus === "failed" || source.metadata?.musicContentUnavailable) && source.metadata.musicRequest ? { musicLastFailure: { id: source.metadata.musicTaskId!, request: source.metadata.musicRequest, error: source.metadata.musicError || source.metadata.errorDetails || t("canvas.music.failed"), seed: source.metadata.musicSeed } } : {}),
+            };
+            const hasContent = Boolean(source.metadata?.content);
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Music];
+            const target = hasContent
+                ? { ...createCanvasNode(CanvasNodeType.Music, { x: source.position.x + source.width + 96 + spec.width / 2, y: source.position.y + source.height / 2 }, metadata), title: request.style.slice(0, 32) }
+                : { ...source, title: request.style.slice(0, 32), metadata: { ...source.metadata, ...metadata } };
+            flushSync(() => {
+                setNodes((prev) => hasContent ? [...prev, target] : prev.map((node) => node.id === nodeId ? { ...node, title: target.title, metadata: { ...node.metadata, ...metadata } } : node));
+                if (hasContent) setConnections((prev) => {
+                    const references = prev.filter((connection) => connection.toNodeId === nodeId).flatMap((connection) => {
+                        const reference = nodesRef.current.find((node) => node.id === connection.fromNodeId);
+                        return reference && isMusicReferenceNode(reference, nodesRef.current) ? [reference.id] : [];
+                    });
+                    return [...prev, ...Array.from(new Set([nodeId, ...references])).map((fromNodeId) => ({ id: nanoid(), fromNodeId, toNodeId: target.id }))];
+                });
+            });
+            updateProject(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
+            setSelectedNodeIds(new Set([target.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(target.id);
+            await runMusicNodeTask(target.id, true, nodeId);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : t("canvas.music.failed"));
+        }
+    }, [message, projectId, runMusicNodeTask, selectedMusicReference, t, updateProject]);
+
+    const handleQueryMusic = useCallback(async (nodeId: string) => {
+        const node = nodesRef.current.find((item) => item.id === nodeId);
+        if (node?.metadata?.content && node.metadata.musicSavePending) {
+            try {
+                await flushCanvasPersistence();
+                if (activeProjectIdRef.current !== projectId) return;
+                updateMusicNode(nodeId, { musicSavePending: false, musicError: undefined, errorDetails: undefined });
+            } catch (error) {
+                if (activeProjectIdRef.current !== projectId) return;
+                const errorDetails = `${t("canvas.music.saveOutputFailed")} ${error instanceof Error ? error.message : ""}`;
+                updateMusicNode(nodeId, { musicSavePending: true, musicError: errorDetails, errorDetails });
+                message.error(errorDetails);
+            }
+            return;
+        }
+        if (node?.metadata?.musicAnalysisId && node.metadata.musicAnalysisStatus !== "completed" && node.metadata.musicAnalysisStatus !== "failed") {
+            await analyzeMusicReference(nodeId, false, true);
+            return;
+        }
+        await runMusicNodeTask(nodeId);
+    }, [analyzeMusicReference, message, projectId, runMusicNodeTask, t, updateMusicNode]);
+    const handleResubmitMusic = useCallback((nodeId: string) => {
+        const node = nodesRef.current.find((item) => item.id === nodeId);
+        if (!node || !hasResumableMusicTask(node) || !node.metadata?.musicTaskMissing || !node.metadata.musicRequest) return;
+        modal.confirm({ title: t("canvas.music.resubmitTitle"), content: t("canvas.music.resubmitDescription"), okText: t("canvas.music.resubmit"), cancelText: t("common.cancel"), onOk: () => runMusicNodeTask(nodeId, true) });
+    }, [modal, runMusicNodeTask, t]);
+
+    const downloadMusicScore = useCallback(async (nodeId: string, variant: "used" | "source" = "used") => {
+        const node = nodesRef.current.find((item) => item.id === nodeId);
+        const taskId = node?.metadata?.musicTaskId;
+        if (!taskId || node?.metadata?.musicTaskEndpoint !== MUSIC_ENDPOINT) return;
+        try {
+            const score = variant === "source" ? await getMusicGenerationScore(taskId, { variant }) : node.metadata.musicScore || await getMusicGenerationScore(taskId);
+            if (activeProjectIdRef.current !== projectId) return;
+            if (!score.trim()) throw new Error(t("canvas.music.scoreUnavailable"));
+            const current = nodesRef.current.find((item) => item.id === nodeId);
+            if (current?.metadata?.musicTaskId !== taskId) return;
+            if (variant === "used") updateMusicNode(nodeId, { musicScore: score });
+            saveAs(new Blob([score], { type: "text/vnd.abc;charset=utf-8" }), `canvas-music-${nodeId}${variant === "source" ? "-source" : ""}.abc`);
+            await flushCanvasPersistence();
+        } catch (error) {
+            if (activeProjectIdRef.current === projectId) message.error(error instanceof Error ? error.message : t("canvas.music.scoreUnavailable"));
+        }
+    }, [message, projectId, t, updateMusicNode]);
+
+    useEffect(() => {
+        activeProjectIdRef.current = projectId;
+        return () => {
+            if (activeProjectIdRef.current === projectId) activeProjectIdRef.current = "";
+            generationRequestsRef.current.forEach((request, id) => {
+                if (request.kind !== "music") return;
+                request.controller.abort();
+                generationRequestsRef.current.delete(id);
+            });
+        };
+    }, [projectId]);
+
     const completeVideoNodeTask = useCallback(
         async (nodeId: string, config: Parameters<typeof buildGenerationConfig>[0], prompt: string, images: Parameters<typeof createVideoGenerationTask>[2], signal: AbortSignal, extra: CanvasNodeData["metadata"] = {}, videos: ReferenceVideo[] = [], audios: ReferenceAudio[] = []) => {
             const task = await createVideoGenerationTask(config, prompt, images, { signal, videos, audios });
@@ -394,6 +719,7 @@ function InfiniteCanvasPage() {
             if (request.runningNodeId !== runningId) return;
             request.controller.abort();
             generationRequestsRef.current.delete(request.targetNodeId);
+            if (request.kind === "music") updateMusicNode(request.targetNodeId, { status: nodesRef.current.find((node) => node.id === request.targetNodeId)?.metadata?.content ? NODE_STATUS_SUCCESS : NODE_STATUS_IDLE, errorDetails: undefined, musicError: undefined });
             affectedNodeIds.add(request.targetNodeId);
             affectedNodeIds.add(request.originNodeId);
         });
@@ -415,15 +741,16 @@ function InfiniteCanvasPage() {
                     : node,
             ),
         );
-    }, [t]);
+    }, [t, updateMusicNode]);
 
     const confirmStopGeneration = useCallback(
         (nodeId: string) => {
+            const music = nodesRef.current.find((node) => node.id === nodeId)?.type === CanvasNodeType.Music;
             modal.confirm({
-                title: t("canvas.projectPage.stopTitle"),
-                content: t("canvas.projectPage.stopDescription"),
-                okText: t("canvas.projectPage.stop"),
-                cancelText: t("canvas.projectPage.continue"),
+                title: t(music ? "canvas.music.stopQueryTitle" : "canvas.projectPage.stopTitle"),
+                content: t(music ? "canvas.music.stopQueryDescription" : "canvas.projectPage.stopDescription"),
+                okText: t(music ? "canvas.music.stopQuery" : "canvas.projectPage.stop"),
+                cancelText: t(music ? "canvas.music.continueQuery" : "canvas.projectPage.continue"),
                 okButtonProps: { danger: true },
                 onOk: () => stopGenerationByRunningId(nodeId),
             });
@@ -472,6 +799,12 @@ function InfiniteCanvasPage() {
     useEffect(() => {
         if (!projectLoaded) return;
         nodesRef.current.filter(hasResumableVideoTask).forEach((node) => void pollVideoNodeTask(node, true));
+        queueMicrotask(() => {
+            if (activeProjectIdRef.current === projectId) {
+                nodesRef.current.filter(hasResumableMusicTask).forEach((node) => void runMusicNodeTask(node.id));
+                nodesRef.current.filter((node) => node.type === CanvasNodeType.Music && node.metadata?.musicAnalysisId && (node.metadata.musicAnalysisStatus === "queued" || node.metadata.musicAnalysisStatus === "running")).forEach((node) => void analyzeMusicReference(node.id, false, true));
+            }
+        });
         // Resume once after the current canvas is restored, not on later config identity changes.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [projectLoaded]);
@@ -625,7 +958,7 @@ function InfiniteCanvasPage() {
     );
 
     const createConnectedNode = useCallback(
-        (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
+        (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Music, pending: PendingConnectionCreate) => {
             const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
@@ -862,6 +1195,12 @@ function InfiniteCanvasPage() {
         (ids: Set<string>) => {
             if (!ids.size) return;
             const allIds = new Set(ids);
+            generationRequestsRef.current.forEach((request, id) => {
+                if (request.kind === "music" && allIds.has(request.targetNodeId)) {
+                    request.controller.abort();
+                    generationRequestsRef.current.delete(id);
+                }
+            });
             setNodes((prev) => {
                 const next = prev.filter((node) => !allIds.has(node.id));
                 return next.map((node) => {
@@ -947,8 +1286,15 @@ function InfiniteCanvasPage() {
         if (!referencePickerNodeId || referenceConnectedNodeIds.has(fromNodeId)) return;
         const source = nodesRef.current.find((node) => node.id === fromNodeId);
         if (!source || !isCanvasReferenceNode(source, nodesRef.current)) return;
+        const target = nodesRef.current.find((node) => node.id === referencePickerNodeId);
+        if (target?.type === CanvasNodeType.Music && !isMusicReferenceNode(source, nodesRef.current)) return;
+        if (target?.type === CanvasNodeType.Music && readMusicDraft(target.metadata).outputType === "instrumental" && !(source.type === CanvasNodeType.Audio || source.type === CanvasNodeType.Music || source.type === CanvasNodeType.Group && getGroupResourceNodes(source.id, nodesRef.current).some((child) => (child.type === CanvasNodeType.Audio || child.type === CanvasNodeType.Music) && child.metadata?.content))) return;
+        if (target?.type === CanvasNodeType.Music && !musicAudioReferences(target.id, nodesRef.current, connectionsRef.current).length && !target.metadata?.musicDraft?.creationMode) {
+            const audioReferences = (source.type === CanvasNodeType.Group ? getGroupResourceNodes(source.id, nodesRef.current) : [source]).filter((node) => (node.type === CanvasNodeType.Audio || node.type === CanvasNodeType.Music) && node.metadata?.content);
+            if (audioReferences.length) updateMusicNode(target.id, { musicDraft: { ...readMusicDraft(target.metadata), creationMode: "melody", referenceNodeId: audioReferences.length === 1 ? audioReferences[0].id : undefined, abc: "" } });
+        }
         setConnections((prev) => [...prev, { id: nanoid(), fromNodeId, toNodeId: referencePickerNodeId }]);
-    }, [referenceConnectedNodeIds, referencePickerNodeId]);
+    }, [referenceConnectedNodeIds, referencePickerNodeId, updateMusicNode]);
 
     useEffect(() => {
         if (!referencePickerNodeId) return;
@@ -974,6 +1320,11 @@ function InfiniteCanvasPage() {
     }, [cancelPendingConnectionCreate]);
 
     const clearCanvas = useCallback(() => {
+        generationRequestsRef.current.forEach((request, id) => {
+            if (request.kind !== "music") return;
+            request.controller.abort();
+            generationRequestsRef.current.delete(id);
+        });
         setNodes([]);
         setConnections([]);
         setInfoNodeId(null);
@@ -1141,8 +1492,15 @@ function InfiniteCanvasPage() {
             historyCommitTimerRef.current = null;
         }
         applyingHistoryRef.current = true;
-        setNodes(entry.nodes);
-        setConnections(entry.connections);
+        generationRequestsRef.current.forEach((request, id) => {
+            if (request.kind !== "music") return;
+            request.controller.abort();
+            generationRequestsRef.current.delete(id);
+            setRunningNodeId((current) => current === request.runningNodeId ? null : current);
+        });
+        const restored = { ...entry, nodes: entry.nodes.map((node) => node.type === CanvasNodeType.Music && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: node.metadata.content ? NODE_STATUS_SUCCESS : node.metadata.musicTaskStatus === "failed" || node.metadata.musicContentUnavailable ? NODE_STATUS_ERROR : NODE_STATUS_IDLE } } : node) };
+        setNodes(restored.nodes);
+        setConnections(restored.connections);
         setChatSessions(entry.chatSessions);
         setActiveChatId(entry.activeChatId);
         setBackgroundMode(entry.backgroundMode);
@@ -1151,7 +1509,7 @@ function InfiniteCanvasPage() {
         setSelectedConnectionId(null);
         setContextMenu(null);
         setTimeout(() => {
-            lastHistoryRef.current = entry;
+            lastHistoryRef.current = restored;
             applyingHistoryRef.current = false;
             setHistoryState({ canUndo: historyRef.current.past.length > 0, canRedo: historyRef.current.future.length > 0 });
         });
@@ -1783,8 +2141,8 @@ function InfiniteCanvasPage() {
     }, []);
 
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {
-        if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
-        saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
+        if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio && node.type !== CanvasNodeType.Music) || !node.metadata?.content) return;
+        saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio || node.type === CanvasNodeType.Music ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
     }, []);
 
     const downloadBatchImage = useCallback((node: CanvasNodeData, imageId: string) => {
@@ -2310,6 +2668,10 @@ function InfiniteCanvasPage() {
     const handleGenerateNode = useCallback(
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
+            if (sourceNode?.type === CanvasNodeType.Music) {
+                await handleGenerateMusic(nodeId);
+                return;
+            }
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
@@ -2745,7 +3107,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, handleGenerateMusic, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
@@ -2753,6 +3115,11 @@ function InfiniteCanvasPage() {
 
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData, imageId?: string) => {
+            if (node.type === CanvasNodeType.Music) {
+                if (hasResumableMusicTask(node)) await runMusicNodeTask(node.id);
+                else await handleGenerateMusic(node.id);
+                return;
+            }
             if (hasResumableVideoTask(node)) {
                 await pollVideoNodeTask(node);
                 return;
@@ -2906,7 +3273,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, startGenerationRequest, t],
+        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, handleGenerateMusic, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, runMusicNodeTask, startGenerationRequest, t],
     );
 
     const deleteBatchImage = useCallback((nodeId: string, imageId: string) => {
@@ -2959,6 +3326,21 @@ function InfiniteCanvasPage() {
         },
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message, t],
     );
+
+    const rearrangeMusic = useCallback((nodeId: string) => {
+        const source = nodesRef.current.find((node) => node.id === nodeId);
+        if (source?.type !== CanvasNodeType.Music || !source.metadata?.content) return;
+        const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Music];
+        const draft = readMusicDraft(source.metadata);
+        const target = createCanvasNode(CanvasNodeType.Music, { x: source.position.x + source.width + 96 + spec.width / 2, y: source.position.y + source.height / 2 }, { musicDraft: { ...draft, creationMode: "melody", referenceNodeId: source.id, lyrics: source.metadata.musicRequest?.lyrics || draft.lyrics, abc: "" } });
+        flushSync(() => {
+            setNodes((prev) => [...prev, target]);
+            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: source.id, toNodeId: target.id }]);
+        });
+        updateProject(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
+        setSelectedNodeIds(new Set([target.id]));
+        setDialogNodeId(target.id);
+    }, [projectId, updateProject]);
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
@@ -3068,6 +3450,25 @@ function InfiniteCanvasPage() {
         (panelNode: CanvasNodeData) =>
             getNodeDefinition(panelNode.type)?.Panel ? (
                 renderPluginPanel(panelNode)
+            ) : panelNode.type === CanvasNodeType.Music ? (
+                <CanvasMusicNodePanel
+                    node={panelNode}
+                    nodes={nodes}
+                    connectedLyrics={buildMusicLyrics(panelNode.id, nodes, connections)}
+                    connectedNodes={connectedNodesByNodeId.get(panelNode.id) || []}
+                    isRunning={panelNode.metadata?.status === NODE_STATUS_LOADING}
+                    onConfigChange={handleConfigNodeChange}
+                    onGenerate={handleGenerateMusic}
+                    onQuery={handleQueryMusic}
+                    onResubmit={handleResubmitMusic}
+                    onStop={confirmStopGeneration}
+                    onDownloadScore={downloadMusicScore}
+                    onAnalyze={analyzeMusicReference}
+                    onRearrange={rearrangeMusic}
+                    onExportText={insertAssistantText}
+                    onDisconnect={disconnectNodeReference}
+                    onStartSelection={startNodeReferenceSelection}
+                />
             ) : panelNode.type === CanvasNodeType.Config ? (
                 <CanvasConfigComposer
                     nodeId={panelNode.id}
@@ -3100,7 +3501,7 @@ function InfiniteCanvasPage() {
                     }}
                 />
             ),
-        [configInputsById, confirmStopGeneration, connectedNodesByNodeId, disconnectNodeReference, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferencesByNodeId, nodes, renderPluginPanel, runningNodeId, startNodeReferenceSelection],
+        [analyzeMusicReference, insertAssistantText, rearrangeMusic, configInputsById, confirmStopGeneration, connectedNodesByNodeId, connections, disconnectNodeReference, downloadMusicScore, handleConfigNodeChange, handleGenerateMusic, handleGenerateNode, handleNodePromptChange, handleQueryMusic, handleResubmitMusic, mentionReferencesByNodeId, nodes, renderPluginPanel, runningNodeId, startNodeReferenceSelection],
     );
 
     const renderNodeContentPanel = useCallback(
@@ -3205,7 +3606,7 @@ function InfiniteCanvasPage() {
                             isFocusRelated={activeNodeId === node.id}
                             isConnectionTarget={connectionTargetNodeId === node.id}
                             isConnecting={Boolean(connectingParams)}
-                            referenceSelectionState={!referencePickerNodeId ? undefined : node.id === referencePickerNodeId ? "target" : referenceConnectedNodeIds.has(node.id) || !isCanvasReferenceNode(node, nodes) ? "disabled" : "available"}
+                            referenceSelectionState={!referencePickerNodeId ? undefined : node.id === referencePickerNodeId ? "target" : referenceConnectedNodeIds.has(node.id) || !isCanvasReferenceNode(node, nodes) || (nodeById.get(referencePickerNodeId)?.type === CanvasNodeType.Music && !isMusicReferenceNode(node, nodes)) ? "disabled" : "available"}
                             showPanel={!isNodeResizing && dialogNodeId === node.id && !selectionBox && !getNodeDefinition(node.type)?.hidePanel}
                             groupChildCount={groupChildCountById.get(node.id) || 0}
                             isGroupDropTarget={dropTargetGroupId === node.id}
@@ -3239,7 +3640,7 @@ function InfiniteCanvasPage() {
                         />
                     ))}
 
-                    {referencePickerNodeId ? <button type="button" className="absolute left-1/2 top-4 z-[90] -translate-x-1/2 rounded-full border px-4 py-2 text-sm font-medium shadow-lg backdrop-blur" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }} onClick={exitNodeReferenceSelection}>{t("canvas.references.selectingHint")}</button> : null}
+                    {referencePickerNodeId ? <button type="button" className="absolute left-1/2 top-4 z-[90] -translate-x-1/2 rounded-full border px-4 py-2 text-sm font-medium shadow-lg backdrop-blur" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }} onClick={exitNodeReferenceSelection}>{t(nodeById.get(referencePickerNodeId)?.type === CanvasNodeType.Music ? "canvas.music.referenceSelectionHint" : "canvas.references.selectingHint")}</button> : null}
 
                     {selectionBox ? (
                         <svg
@@ -3317,6 +3718,7 @@ function InfiniteCanvasPage() {
                     onAddImage={() => createNode(CanvasNodeType.Image)}
                     onAddVideo={() => createNode(CanvasNodeType.Video)}
                     onAddAudio={() => createNode(CanvasNodeType.Audio)}
+                    onAddMusic={() => createNode(CanvasNodeType.Music)}
                     onAddText={() => createNode(CanvasNodeType.Text)}
                     onAddConfig={() => createNode(CanvasNodeType.Config)}
                     onAddGroup={() => createNode(CanvasNodeType.Group)}
@@ -3364,7 +3766,7 @@ function InfiniteCanvasPage() {
                     />
                 ) : null}
 
-                <input ref={imageInputRef} type="file" multiple accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav" className="hidden" onChange={handleImageInputChange} />
+                <input ref={imageInputRef} type="file" multiple accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,audio/flac,audio/x-flac,.mp3,.wav,.flac" className="hidden" onChange={handleImageInputChange} />
 
                 <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => setInfoNodeId(null)} />
                 <CanvasPluginManagerModal open={pluginManagerOpen} onClose={() => setPluginManagerOpen(false)} />

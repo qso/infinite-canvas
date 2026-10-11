@@ -1,7 +1,7 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Button, Segmented, Switch } from "antd";
-import { CircleDot, Eraser, Grid2x2, Group, Hand, Image as ImageIcon, Info, Moon, MousePointer2, Music2, Palette, Puzzle, Redo2, Settings2, Square, Sun, Trash2, Type, Undo2, Upload, Video } from "lucide-react";
+import { CircleDot, Eraser, Grid2x2, Group, Hand, Image as ImageIcon, Info, Moon, MousePointer2, Music2, Music4, Palette, Puzzle, Redo2, Settings2, Square, Sun, Trash2, Type, Undo2, Upload, Video } from "lucide-react";
 
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme, type CanvasTheme } from "@/lib/canvas-theme";
 import { getNodePluginId, listNodeDefinitions, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
@@ -19,6 +19,7 @@ export function CanvasToolbar({
     onAddImage,
     onAddVideo,
     onAddAudio,
+    onAddMusic,
     onAddText,
     onAddConfig,
     onAddGroup,
@@ -41,6 +42,7 @@ export function CanvasToolbar({
     onAddImage: () => void;
     onAddVideo: () => void;
     onAddAudio: () => void;
+    onAddMusic: () => void;
     onAddText: () => void;
     onAddConfig: () => void;
     onAddGroup: () => void;
@@ -112,6 +114,9 @@ export function CanvasToolbar({
                 </ToolbarButton>
                 <ToolbarButton id="tool-audio" label={t("canvas.toolbar.audio")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAudio}>
                     <Music2 className="size-4.5" />
+                </ToolbarButton>
+                <ToolbarButton id="tool-music" label={t("canvas.toolbar.music")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddMusic}>
+                    <Music4 className="size-4.5" />
                 </ToolbarButton>
                 <ToolbarButton id="tool-config" label={t("canvas.toolbar.config")} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddConfig}>
                     <Settings2 className="size-4.5" />
@@ -360,6 +365,7 @@ function toolLabel(id: string, t: (key: string) => string) {
     if (id === "tool-image") return t("canvas.toolbar.image");
     if (id === "tool-video") return t("canvas.toolbar.video");
     if (id === "tool-audio") return t("canvas.toolbar.audio");
+    if (id === "tool-music") return t("canvas.toolbar.music");
     if (id === "tool-config") return t("canvas.toolbar.config");
     if (id === "tool-group") return t("canvas.toolbar.group");
     if (id === "tool-extensions") return t("canvas.toolbar.extensions");

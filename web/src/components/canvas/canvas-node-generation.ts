@@ -6,6 +6,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import { getGenerationResourceNodes, getGroupResourceNodes } from "@/lib/canvas/canvas-resource-references";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
+import { audioExtension } from "@/lib/canvas/canvas-generation-helpers";
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -125,6 +126,28 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
     };
 }
 
+export function musicReferenceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    const sources = connections.filter((connection) => connection.toNodeId === nodeId).flatMap((connection) => {
+        const node = nodes.find((item) => item.id === connection.fromNodeId);
+        return !node ? [] : node.type === CanvasNodeType.Group ? getGroupResourceNodes(node.id, nodes) : [node];
+    });
+    return [...new Map(sources.map((node) => [node.id, node])).values()];
+}
+
+export function musicAudioReferences(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    return musicReferenceNodes(nodeId, nodes, connections).filter((node) => (node.type === CanvasNodeType.Audio || node.type === CanvasNodeType.Music) && node.metadata?.content);
+}
+
+export function isMusicReferenceNode(node: CanvasNodeData, nodes: CanvasNodeData[]) {
+    return node.type === CanvasNodeType.Text && !!(node.metadata?.content || node.metadata?.prompt) || (node.type === CanvasNodeType.Audio || node.type === CanvasNodeType.Music) && !!node.metadata?.content || node.type === CanvasNodeType.Group && getGroupResourceNodes(node.id, nodes).some((child) => child.type === CanvasNodeType.Text || child.type === CanvasNodeType.Audio || child.type === CanvasNodeType.Music);
+}
+
+export function buildMusicLyrics(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    return musicReferenceNodes(nodeId, nodes, connections).filter((node) => node.type === CanvasNodeType.Text)
+        .map((node) => node.metadata?.content?.trim() ? node.metadata.content : node.metadata?.prompt || "")
+        .filter((text) => text.trim()).join("\n\n");
+}
+
 export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): NodeGenerationInput[] {
     return getGenerationResourceNodes(nodeId, nodes, connections).flatMap((node): NodeGenerationInput[] => {
         if (node.type === CanvasNodeType.Group) {
@@ -217,10 +240,10 @@ function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {
 }
 
 function readReferenceAudio(node: CanvasNodeData): ReferenceAudio | null {
-    if (node.type !== CanvasNodeType.Audio || !node.metadata?.content) return null;
+    if ((node.type !== CanvasNodeType.Audio && node.type !== CanvasNodeType.Music) || !node.metadata?.content) return null;
     return {
         id: node.id,
-        name: `${node.title || node.id}.mp3`,
+        name: `${node.title || node.id}.${node.type === CanvasNodeType.Music ? audioExtension(node.metadata.mimeType || "audio/wav") : "mp3"}`,
         type: node.metadata.mimeType || "audio/mpeg",
         url: node.metadata.content,
         storageKey: node.metadata.storageKey,

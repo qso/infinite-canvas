@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 
 import { nanoid } from "nanoid";
+import localforage from "localforage";
 import i18n from "@/i18n";
 import { localForageStorage } from "@/lib/localforage-storage";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
@@ -44,6 +45,19 @@ const CANVAS_STORE_KEY = "infinite-canvas:canvas_store";
 type PersistedCanvasState = Pick<CanvasStore, "projects" | "deletedProjects">;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
+let canvasWrite: Promise<unknown> = Promise.resolve();
+
+// Music task identity must reach IndexedDB before its idempotent POST is sent.
+export async function flushCanvasPersistence() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = null;
+    const { projects, deletedProjects } = useCanvasStore.getState();
+    queuedPersistState = { projects, deletedProjects };
+    const value = JSON.stringify({ state: queuedPersistState, version: 0 });
+    const write = canvasWrite.catch(() => {}).then(() => localforage.setItem(CANVAS_STORE_KEY, value));
+    canvasWrite = write;
+    await write;
+}
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
@@ -60,7 +74,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         if (saveTimer) clearTimeout(saveTimer);
         saveTimer = setTimeout(() => {
             saveTimer = null;
-            void localForageStorage.setItem(name, JSON.stringify(value));
+            canvasWrite = canvasWrite.catch(() => {}).then(() => localForageStorage.setItem(name, JSON.stringify(value)));
         }, 400);
     },
     removeItem: (name) => localForageStorage.removeItem(name),
