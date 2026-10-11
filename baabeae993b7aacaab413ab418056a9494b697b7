@@ -1,0 +1,478 @@
+web/src/lib/canvas/canvas-generation-helpers.ts
+  eb358895d9614f99 132,139-147,153-154,164
+  20941e9acfca1e6e 160-163,178
+  1b8e4a6984dbda9f 3,51,131,133-138,148-152,155-159,165-170,226
+docs/content/docs/progress/pending-test.mdx
+  eb358895d9614f99 10-12
+  20941e9acfca1e6e 13-15
+web/src/components/canvas/canvas-music-node-panel.tsx
+  20941e9acfca1e6e 3,6-7,14-15,17,19,29-31,37-38,41,45-46,50,54,63-67,69-78,80-82,84-86,88-95,97-101,103-107,110,112,114,121-122,124,127-129,133,136-137,143,151,153-156,158-161,163,165-171,173,178,183-185
+  eb358895d9614f99 2,8,10-11,28,42-44,47,49,51-53,55-62,68,79,83,87,96,102,111,113,115-120,123,125-126,130-132,134-135,138-142,144-150,152,157,162,164,172,175,177,179-182
+  1b8e4a6984dbda9f 1,4-5,9,12-13,16,18,20-27,32-36,39-40,48,108-109,174,176,186-187
+services/yue2/api.py
+  eb358895d9614f99 5,13,30,114,271-276,280,304,338-362,406-407,430-434,440-449,481-482,599,601-605
+  20941e9acfca1e6e 1-4,6-12,14-29,31-113,115-270,277-279,281-303,305-337,363-405,408-429,435-439,450-480,483-598,600,606-613
+services/yue2/start.sh
+  20941e9acfca1e6e 1-19
+services/yue2/recover.sh
+  20941e9acfca1e6e 1-32
+web/src/lib/canvas/canvas-export.ts
+  1b8e4a6984dbda9f 87
+web/src/lib/canvas/canvas-resource-references.ts
+  1b8e4a6984dbda9f 143
+web/src/components/canvas/canvas-node-generation.ts
+  eb358895d9614f99 142
+  1b8e4a6984dbda9f 9,130-133,147,149-150,243,246
+  20941e9acfca1e6e 129,134-141,143-146,148
+docs/content/docs/development/local-development.mdx
+  eb358895d9614f99 54-58
+  20941e9acfca1e6e 32-53,59-60
+docs/index.md
+  20941e9acfca1e6e 18
+docs/content/docs/progress/todo.mdx
+  eb358895d9614f99 10-11
+  20941e9acfca1e6e 8-9,12
+web/src/services/api/music.ts
+  1b8e4a6984dbda9f 1,3-21,31-44,79-86,91,120-121,125-127,129-130,141-163
+  20941e9acfca1e6e 2,29-30,45-57,59,70-78
+  eb358895d9614f99 22-28,58,60-69,87-90,92-119,122-124,128,131-140
+web/src/constant/music.ts
+  eb358895d9614f99 8,28,48,69-70
+  20941e9acfca1e6e 9-23,35-42,55-58,71
+  1b8e4a6984dbda9f 1-7,24-27,29-34,43-47,49-54,59-68,72-84
+web/src/components/canvas/canvas-create-menus.tsx
+  1b8e4a6984dbda9f 2,21,47
+web/src/components/canvas/canvas-node.tsx
+  1b8e4a6984dbda9f 136,458-459,479,498,500-501,505,517-518,719,724,731
+web/src/components/canvas/canvas-node-hover-toolbar.tsx
+  1b8e4a6984dbda9f 115-116,123,149,154,161,269,276
+  20941e9acfca1e6e 7,122
+services/yue2/instrumental/abc_tools.py
+  eb358895d9614f99 1-337
+services/yue2/requirements.txt
+  20941e9acfca1e6e 1-10
+web/src/components/canvas/canvas-side-panel.tsx
+  1b8e4a6984dbda9f 4,41,136
+services/yue2/instrumental/compile_score.py
+  eb358895d9614f99 1-226
+web/src/pages/canvas/project.tsx
+  1b8e4a6984dbda9f 2,44,50,62,68,74-75,178-179,321-322,334-335,408-433,435-511,524,533,535-557,565-573,575-590,595,597-602,604-607,609-612,615-632,722,744,748,750-753,802,807,961,1198-1203,1289,1323-1327,1495-1503,1512,2144-2145,2671-2674,3110,3118-3122,3276,3453-3455,3457-3465,3469-3471,3721,3769
+  eb358895d9614f99 76-77,336,346-347,350-354,358,360-364,367,370-371,373-380,382,385-389,391-394,397-398,400-401,514,516-518,522-523,525-532,534,558-564,603,608,613-614,1291-1294,1297,3643
+  20941e9acfca1e6e 11-12,16,37,323-333,337-345,348-349,355-357,359,365-366,368-369,372,381,383-384,390,395-396,399,402-407,434,512-513,515,519-521,574,591-594,596,803-806,1290,1295,3330-3344,3456,3466-3468,3504,3609
+services/yue2/requirements-sheetsage.txt
+  20941e9acfca1e6e 1-12
+services/yue2/instrumental/LICENSE
+  eb358895d9614f99 1-21
+services/yue2/reference_worker.py
+  20941e9acfca1e6e 1-105
+services/yue2/requirements-flamingo.txt
+  20941e9acfca1e6e 1-5
+services/yue2/instrumental/instrumentalize.py
+  eb358895d9614f99 1-140
+web/src/stores/canvas/use-canvas-store.ts
+  1b8e4a6984dbda9f 5,48-60,77
+AGENTS.md
+  20941e9acfca1e6e 54
+services/yue2/deploy.sh
+  eb358895d9614f99 10,13-16
+  20941e9acfca1e6e 1-9,11-12,17-24
+web/src/components/canvas/canvas-node-reference-bar.tsx
+  eb358895d9614f99 40
+services/yue2/instrumental/common.py
+  eb358895d9614f99 1-34
+web/src/types/canvas.ts
+  20941e9acfca1e6e 1,81-91
+  1b8e4a6984dbda9f 2,20,80,92-104
+services/yue2/bootstrap.py
+  20941e9acfca1e6e 1-106
+CHANGELOG.md
+  eb358895d9614f99 5-9
+  20941e9acfca1e6e 10-11
+web/src/components/canvas/nodes/builtin-nodes.tsx
+  1b8e4a6984dbda9f 1,15,27
+services/yue2/bootstrap-reference.py
+  20941e9acfca1e6e 1-115
+web/src/constant/canvas.ts
+  1b8e4a6984dbda9f 2,20,45-48
+web/src/i18n/locales/en-US.ts
+  20941e9acfca1e6e 273-274,277-278
+  1b8e4a6984dbda9f 254,256,266,272,279-280,282-286,288,290,296
+  eb358895d9614f99 275-276,281,287,289
+web/.env.local
+  20941e9acfca1e6e 3-4
+web/src/i18n/locales/zh-CN.ts
+  1b8e4a6984dbda9f 254,256,266,272,279-280,282-286,288,290,296
+  20941e9acfca1e6e 273-274,277-278
+  eb358895d9614f99 275-276,281,287,289
+web/src/components/canvas/canvas-toolbar.tsx
+  1b8e4a6984dbda9f 4,22,45,118-120,368
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "baabeae993b7aacaab413ab418056a9494b697b7",
+  "prompts": {
+    "1b8e4a6984dbda9f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a32296f-9e2f-4ba3-8d55-3eac082cabd4",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 740,
+      "total_deletions": 124,
+      "accepted_lines": 555,
+      "overriden_lines": 1,
+      "per_file_stats": {
+        "web/src/types/canvas.ts": {
+          "additions": 17,
+          "accepted_lines": 16
+        },
+        "web/src/pages/canvas/project.tsx": {
+          "additions": 318,
+          "deletions": 55,
+          "accepted_lines": 261
+        },
+        "web/src/components/canvas/canvas-node.tsx": {
+          "additions": 15,
+          "deletions": 11,
+          "accepted_lines": 13,
+          "overriden_lines": 1
+        },
+        "web/src/lib/canvas/canvas-generation-helpers.ts": {
+          "additions": 32,
+          "deletions": 6,
+          "accepted_lines": 26
+        },
+        "web/src/services/api/music.ts": {
+          "additions": 82,
+          "accepted_lines": 73
+        },
+        "web/src/components/canvas/canvas-create-menus.tsx": {
+          "additions": 3,
+          "deletions": 2,
+          "accepted_lines": 3
+        },
+        "web/src/constant/music.ts": {
+          "additions": 63,
+          "deletions": 11,
+          "accepted_lines": 51
+        },
+        "web/src/stores/canvas/use-canvas-store.ts": {
+          "additions": 15,
+          "deletions": 1,
+          "accepted_lines": 15
+        },
+        "web/src/i18n/locales/en-US.ts": {
+          "additions": 21,
+          "deletions": 8,
+          "accepted_lines": 14
+        },
+        "web/src/components/canvas/canvas-toolbar.tsx": {
+          "additions": 7,
+          "deletions": 1,
+          "accepted_lines": 7
+        },
+        "web/src/components/canvas/canvas-node-hover-toolbar.tsx": {
+          "additions": 10,
+          "deletions": 6,
+          "accepted_lines": 8
+        },
+        "web/src/components/canvas/canvas-node-generation.ts": {
+          "additions": 16,
+          "deletions": 3,
+          "accepted_lines": 10
+        },
+        "web/src/lib/canvas/canvas-export.ts": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "web/src/components/canvas/canvas-side-panel.tsx": {
+          "additions": 3,
+          "deletions": 2,
+          "accepted_lines": 3
+        },
+        "web/src/components/canvas/canvas-music-node-panel.tsx": {
+          "additions": 106,
+          "deletions": 7,
+          "accepted_lines": 30
+        },
+        "web/src/i18n/locales/zh-CN.ts": {
+          "additions": 21,
+          "deletions": 8,
+          "accepted_lines": 14
+        },
+        "web/src/components/canvas/nodes/builtin-nodes.tsx": {
+          "additions": 3,
+          "deletions": 2,
+          "accepted_lines": 3
+        },
+        "web/src/constant/canvas.ts": {
+          "additions": 6,
+          "accepted_lines": 6
+        },
+        "web/src/lib/canvas/canvas-resource-references.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        }
+      }
+    },
+    "20941e9acfca1e6e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "244b7cc9-18c1-4634-b7dd-3441ffb857b9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 1518,
+      "total_deletions": 204,
+      "accepted_lines": 1319,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "web/src/components/canvas/canvas-music-node-panel.tsx": {
+          "additions": 141,
+          "deletions": 71,
+          "accepted_lines": 91
+        },
+        "services/yue2/requirements.txt": {
+          "additions": 10,
+          "accepted_lines": 10
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 6,
+          "deletions": 3,
+          "accepted_lines": 3
+        },
+        "services/yue2/requirements-sheetsage.txt": {
+          "additions": 12,
+          "accepted_lines": 12
+        },
+        "web/src/lib/canvas/canvas-generation-helpers.ts": {
+          "additions": 7,
+          "deletions": 3,
+          "accepted_lines": 5
+        },
+        "web/src/i18n/locales/en-US.ts": {
+          "additions": 5,
+          "accepted_lines": 4
+        },
+        "web/vite.config.ts": {
+          "additions": 39,
+          "deletions": 10,
+          "accepted_lines": 34
+        },
+        "web/src/pages/canvas/project.tsx": {
+          "additions": 137,
+          "deletions": 25,
+          "accepted_lines": 88
+        },
+        "docs/content/docs/development/local-development.mdx": {
+          "additions": 25,
+          "accepted_lines": 24
+        },
+        "AGENTS.md": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "web/.env.local": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "CHANGELOG.md": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "services/yue2/reference_worker.py": {
+          "additions": 110,
+          "deletions": 5,
+          "accepted_lines": 105
+        },
+        "services/yue2/start.sh": {
+          "additions": 19,
+          "accepted_lines": 19
+        },
+        "web/src/services/api/music.ts": {
+          "additions": 27,
+          "deletions": 3,
+          "accepted_lines": 26
+        },
+        "web/src/types/canvas.ts": {
+          "additions": 12,
+          "deletions": 1,
+          "accepted_lines": 12
+        },
+        "web/src/components/canvas/canvas-node-generation.ts": {
+          "additions": 15,
+          "deletions": 5,
+          "accepted_lines": 14
+        },
+        "web/src/components/canvas/canvas-node-hover-toolbar.tsx": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "services/yue2/deploy.sh": {
+          "additions": 20,
+          "accepted_lines": 19
+        },
+        "docs/index.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "services/yue2/api.py": {
+          "additions": 608,
+          "deletions": 54,
+          "accepted_lines": 551
+        },
+        "docs/content/docs/progress/todo.mdx": {
+          "additions": 4,
+          "accepted_lines": 3
+        },
+        "services/yue2/bootstrap-reference.py": {
+          "additions": 117,
+          "deletions": 2,
+          "accepted_lines": 115
+        },
+        "services/yue2/requirements-flamingo.txt": {
+          "additions": 5,
+          "accepted_lines": 5
+        },
+        "web/src/i18n/locales/zh-CN.ts": {
+          "additions": 5,
+          "accepted_lines": 4
+        },
+        "services/yue2/bootstrap.py": {
+          "additions": 122,
+          "deletions": 16,
+          "accepted_lines": 106
+        },
+        "web/src/constant/music.ts": {
+          "additions": 29,
+          "deletions": 1,
+          "accepted_lines": 28
+        },
+        "services/yue2/recover.sh": {
+          "additions": 32,
+          "accepted_lines": 32
+        },
+        "web/src/components/canvas/canvas-node.tsx": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 1
+        }
+      }
+    },
+    "eb358895d9614f99": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "225dd70b-0741-4b83-962f-5802ec750646",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 1099,
+      "total_deletions": 146,
+      "accepted_lines": 1073,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "services/yue2/instrumental/common.py": {
+          "additions": 34,
+          "accepted_lines": 34
+        },
+        "web/src/i18n/locales/en-US.ts": {
+          "additions": 6,
+          "deletions": 5,
+          "accepted_lines": 5
+        },
+        "services/yue2/instrumental/LICENSE": {
+          "additions": 21,
+          "accepted_lines": 21
+        },
+        "docs/content/docs/development/local-development.mdx": {
+          "additions": 5,
+          "deletions": 1,
+          "accepted_lines": 5
+        },
+        "web/src/pages/canvas/project.tsx": {
+          "additions": 84,
+          "deletions": 58,
+          "accepted_lines": 73
+        },
+        "web/src/components/canvas/canvas-node-reference-bar.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "services/yue2/api.py": {
+          "additions": 63,
+          "deletions": 4,
+          "accepted_lines": 62
+        },
+        "web/src/i18n/locales/zh-CN.ts": {
+          "additions": 6,
+          "deletions": 5,
+          "accepted_lines": 5
+        },
+        "web/src/components/canvas/canvas-node-generation.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 1
+        },
+        "web/src/components/canvas/canvas-music-node-panel.tsx": {
+          "additions": 76,
+          "deletions": 58,
+          "accepted_lines": 66
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "services/yue2/instrumental/instrumentalize.py": {
+          "additions": 140,
+          "accepted_lines": 140
+        },
+        "CHANGELOG.md": {
+          "additions": 5,
+          "accepted_lines": 5
+        },
+        "services/yue2/instrumental/abc_tools.py": {
+          "additions": 337,
+          "accepted_lines": 337
+        },
+        "docs/content/docs/progress/todo.mdx": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "web/src/constant/music.ts": {
+          "additions": 5,
+          "accepted_lines": 5
+        },
+        "web/src/services/api/music.ts": {
+          "additions": 64,
+          "deletions": 7,
+          "accepted_lines": 64
+        },
+        "web/src/lib/canvas/canvas-generation-helpers.ts": {
+          "additions": 14,
+          "deletions": 3,
+          "accepted_lines": 13
+        },
+        "services/yue2/instrumental/compile_score.py": {
+          "additions": 226,
+          "accepted_lines": 226
+        },
+        "services/yue2/deploy.sh": {
+          "additions": 5,
+          "deletions": 1,
+          "accepted_lines": 5
+        }
+      }
+    }
+  }
+}
