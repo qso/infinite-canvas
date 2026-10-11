@@ -71,6 +71,15 @@
 - 每次任务完成前，都要根据实际变更检查并更新 `docs/content/docs/progress/todo.mdx` 和 `docs/content/docs/progress/pending-test.mdx`；如果功能或待办没有变化，也要确认无需修改。
 - 文档不要写过期日期；除非用户明确要求记录具体时间。
 
+## 分支与上游同步
+
+- 本仓库 `origin`（qso/infinite-canvas，SSH 地址）是 `basketikun/infinite-canvas`（remote 名 `upstream`）的长期分叉 fork；`upstream` 只 fetch 不 push。
+- `main` 是私人集成分支，与上游永久分叉；同步上游只允许 `merge upstream/main`，禁止 rebase。
+- 同步流程：`git fetch upstream` → 在 main 上打保险 tag（如 `pre-sync-v0.21`）→ `git merge upstream/main` → push → 用户确认后再删 tag；合并出错时用 tag 回退。
+- 解决同步冲突时双方都要保留：上游新特性与本仓私人功能（H3 视频、YuE2 音乐等）必须共存，不得为省事丢弃任何一侧。
+- 私人功能优先放在新文件或新目录（如 `services/`），尽量少改 `web/src/pages/canvas/project.tsx`、`canvas-node.tsx` 等双方高频修改的热点文件，减少未来冲突面。
+- 上游每发一个版本就同步一次，不要长期积攒；新功能用短期 feature 分支开发，成熟后合回 main。
+
 ## 发版本流程
 
 - 发版本时，先把 `CHANGELOG.md` 的 `Unreleased` 变更整理成新的版本记录，并保留空的 `Unreleased` 标题。
