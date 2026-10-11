@@ -1,7 +1,9 @@
 import axios from "axios";
 
 import i18n from "@/i18n";
+import { isQwenImage21 } from "@/constant/comfyui";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { qwenComfyError, runQwenImageGeneration } from "./comfyui-qwen";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -694,6 +696,13 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    if (isQwenImage21(config.model || config.imageModel)) {
+        try {
+            return await runQwenImageGeneration(config, prompt, [], n, options?.signal);
+        } catch (error) {
+            throw new Error(readAxiosError(error, qwenComfyError(error)));
+        }
+    }
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {
         const quality = normalizeQuality(config.quality);
@@ -754,6 +763,13 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    if (isQwenImage21(config.model || config.imageModel)) {
+        try {
+            return await runQwenImageGeneration(config, prompt, references, n, options?.signal);
+        } catch (error) {
+            throw new Error(readAxiosError(error, qwenComfyError(error)));
+        }
+    }
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {

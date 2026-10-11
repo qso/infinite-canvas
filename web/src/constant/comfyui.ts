@@ -1,9 +1,12 @@
 export const MINIMAX_H3_OPTION = "comfyui::MiniMax-H3";
 export const MINIMAX_H3_FAST_OPTION = "comfyui::MiniMax-H3-Fast";
+export const QWEN_IMAGE_21_OPTION = "comfyui::Qwen-Image-2.1";
 export const COMFYUI_PROXY_PATH = "/comfyui";
 export const H3_DEFAULT_STEPS = 20;
 export const H3_FAST_DEFAULT_STEPS = 4;
 export const H3_MAX_STEPS = 10000; // BasicScheduler's native upper bound.
+export const QWEN_IMAGE_21_DEFAULT_STEPS = 25; // 官方模板起步值；官方管线推荐 40-50。
+export const QWEN_IMAGE_21_MAX_STEPS = 60;
 // 转发目标地址放在 web/.env.local 的 COMFYUI_REMOTE_URL（vite.config / 测试脚本读取）。
 
 export function isMiniMaxH3(value: string) {
@@ -12,6 +15,11 @@ export function isMiniMaxH3(value: string) {
 
 export function isMiniMaxH3Fast(value: string) {
     return /^minimax[-_ ]?h3[-_ ]?fast/i.test(value.split("::").at(-1)?.trim() || "");
+}
+
+/** 精确匹配内置选项，避免误接管渠道里同名的 Qwen 模型。 */
+export function isQwenImage21(value: string) {
+    return value === QWEN_IMAGE_21_OPTION;
 }
 
 /** Quick prompt templates for H3 reference-to-video; tags must match the connection order (images → Picture, videos → Video). */

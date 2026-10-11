@@ -4,7 +4,7 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
-import { H3_DEFAULT_STEPS, isMiniMaxH3, MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION } from "@/constant/comfyui";
+import { H3_DEFAULT_STEPS, isMiniMaxH3, isQwenImage21, MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION, QWEN_IMAGE_21_DEFAULT_STEPS, QWEN_IMAGE_21_OPTION } from "@/constant/comfyui";
 
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -55,6 +55,11 @@ export type AiConfig = {
     quality: string;
     size: string;
     background: string;
+    imageSteps: string;
+    imageCfg: string;
+    imageSeed: string;
+    imageNegative: string;
+    imageResolution: string;
     count: string;
     canvasImageCount: string;
     proxyEnabled: boolean;
@@ -128,6 +133,11 @@ export const defaultConfig: AiConfig = {
     quality: "auto",
     size: "1:1",
     background: "",
+    imageSteps: String(QWEN_IMAGE_21_DEFAULT_STEPS),
+    imageCfg: "1",
+    imageSeed: "",
+    imageNegative: "",
+    imageResolution: "1024",
     count: "1",
     canvasImageCount: "3",
     proxyEnabled: false,
@@ -170,6 +180,7 @@ const IMAGE_KEYWORDS = ["seedream", "gpt-image", "image", "dall-e", "dalle", "im
 /** Best-effort default capability for a freshly fetched model name; user can override in the channel editor. */
 export function guessCapability(name: string): ModelCapability {
     if (isMiniMaxH3(name)) return "video";
+    if (isQwenImage21(name)) return "image";
     const value = name.toLowerCase();
     if (VIDEO_KEYWORDS.some((keyword) => value.includes(keyword))) return "video";
     if (AUDIO_KEYWORDS.some((keyword) => value.includes(keyword))) return "audio";
@@ -187,6 +198,7 @@ function findChannelModel(config: AiConfig, value: string): { channel: ModelChan
 
 export function modelCapabilityOf(config: AiConfig, value: string): ModelCapability | undefined {
     if (isMiniMaxH3(value)) return "video";
+    if (isQwenImage21(value)) return "image";
     return findChannelModel(config, value)?.model.capability;
 }
 
@@ -210,7 +222,8 @@ export function resolveModelForCapability(config: AiConfig, currentModel: string
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
     const models = capability ? config.channels.flatMap((channel) => channel.models.filter((model) => model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name))) : config.models;
-    return Array.from(new Set([...(!capability || capability === "video" ? [MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION] : []), ...models]));
+    const builtin = [...(!capability || capability === "video" ? [MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION] : []), ...(capability === "image" ? [QWEN_IMAGE_21_OPTION] : [])];
+    return Array.from(new Set([...builtin, ...models]));
 }
 
 /** The user script (if any) attached to a model; empty string means use the system default call. */
@@ -219,7 +232,7 @@ export function resolveModelScript(config: AiConfig, value: string) {
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
-    if (isMiniMaxH3(model)) return true;
+    if (isMiniMaxH3(model) || isQwenImage21(model)) return true;
     const match = findChannelModel(config, model);
     return Boolean(match && match.channel.baseUrl.trim() && match.channel.apiKey.trim());}
 
@@ -290,6 +303,11 @@ export const useConfigStore = create<ConfigStore>()(
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         videoMode: config.videoMode === "reference" || config.videoMode === "text" ? config.videoMode : "frames",
+                        imageSteps: config.imageSteps || String(QWEN_IMAGE_21_DEFAULT_STEPS),
+                        imageCfg: config.imageCfg || "1",
+                        imageSeed: config.imageSeed || "",
+                        imageNegative: config.imageNegative || "",
+                        imageResolution: config.imageResolution || "1024",
                         canvasImageCount: config.canvasImageCount || "3",
                         proxyEnabled: Boolean(config.proxyEnabled),
                         proxyUrl: config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,
@@ -421,6 +439,7 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     // that happens to be named like MiniMax-H3 keeps its channel label instead.
     if (value === MINIMAX_H3_FAST_OPTION) return "MiniMax H3 加速版（云端 ComfyUI）";
     if (value === MINIMAX_H3_OPTION) return "MiniMax-H3（云端 ComfyUI）";
+    if (value === QWEN_IMAGE_21_OPTION) return "Qwen Image 2.1（云端 ComfyUI）";
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
@@ -434,7 +453,7 @@ export function modelOptionsFromChannels(channels: ModelChannel[]) {
 export function normalizeModelOptionValue(value: string | undefined, channels: ModelChannel[]) {
     const model = (value || "").trim();
     if (!model) return "";
-    if (model === MINIMAX_H3_OPTION || model === MINIMAX_H3_FAST_OPTION) return model;
+    if (model === MINIMAX_H3_OPTION || model === MINIMAX_H3_FAST_OPTION || model === QWEN_IMAGE_21_OPTION) return model;
     const decoded = decodeChannelModel(model);
     if (decoded) {
         const channel = channels.find((item) => item.id === decoded.channelId);
