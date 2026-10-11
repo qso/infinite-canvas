@@ -4,7 +4,7 @@ export type ComfyWorkflow = Record<string, { class_type: string; inputs: Record<
 export type QwenImageWorkflowInput = {
     prompt: string;
     negativePrompt: string;
-    /** 文生图输出宽高（32 对齐）；图像编辑时不使用。 */
+    /** 文生图输出宽高（32 对齐）；图像编辑时不使用。选 4K 时是折半后的原生采样宽高。 */
     width: number;
     height: number;
     /** 图像编辑的像素预算：参考图按比例缩放到约 resolution²（32 对齐）；0 表示保持参考图原始尺寸。 */
@@ -15,6 +15,8 @@ export type QwenImageWorkflowInput = {
     /** 文生图一次采样出多张；图像编辑由服务端按张数提交多个任务。 */
     count: number;
     images: string[];
+    /** 4K 档：原生出图后经 SeedVR2 超分到该长边；0 表示关闭。 */
+    upscaleLongEdge: number;
     outputPrefix: string;
 };
 
@@ -23,6 +25,12 @@ export const QWEN_IMAGE_21_MODELS = {
     unet: "qwen_image_2.1_bf16.safetensors",
     clip: "qwen3vl_8b_bf16.safetensors",
     vae: "qwen_image_2.1_vae_bf16.safetensors",
+};
+
+/** 4K 超分（ModelScope: Comfy-Org/SeedVR2，comfy-core 内置节点链）。 */
+export const QWEN_SEEDVR2_MODELS = {
+    unet: "seedvr2_7b_fp16.safetensors",
+    vae: "seedvr2_ema_vae_fp16.safetensors",
 };
 
 /** 官方图像编辑链路支持的最大参考图数量（image_1 是编辑目标，其余是参考）。 */
@@ -58,7 +66,8 @@ export function buildQwenImageWorkflow(input: QwenImageWorkflowInput): ComfyWork
             denoise: 1,
         }),
         "8": node("VAEDecode", { samples: ["7", 0], vae: ["3", 0] }),
-        "9": node("SaveImage", { images: ["8", 0], filename_prefix: input.outputPrefix }),
+        ...(input.upscaleLongEdge ? buildSeedVR2Upscale(input) : {}),
+        "9": node("SaveImage", { images: [input.upscaleLongEdge ? "28" : "8", 0], filename_prefix: input.outputPrefix }),
     };
     if (!editing) graph["6"] = node("EmptyLatentImage", { width: input.width, height: input.height, batch_size: input.count });
     input.images.forEach((image, index) => {
@@ -67,6 +76,25 @@ export function buildQwenImageWorkflow(input: QwenImageWorkflowInput): ComfyWork
         conditioning[`images.image_${index + 1}`] = [id, 0];
     });
     return graph;
+}
+
+/**
+ * SeedVR2 单步扩散超分（官方内置链）：lanczos 预放大到目标长边 → 分块 VAE 编码 →
+ * 1 步采样还原细节 → 分块解码 → 与预放大结果做色彩校正。
+ */
+function buildSeedVR2Upscale(input: QwenImageWorkflowInput): ComfyWorkflow {
+    const node = (class_type: string, inputs: Record<string, unknown>) => ({ class_type, inputs });
+    return {
+        "20": node("ImageScaleToMaxDimension", { image: ["8", 0], upscale_method: "lanczos", largest_size: input.upscaleLongEdge }),
+        "21": node("SeedVR2Preprocess", { resized_images: ["20", 0] }),
+        "22": node("VAELoader", { vae_name: QWEN_SEEDVR2_MODELS.vae }),
+        "23": node("UNETLoader", { unet_name: QWEN_SEEDVR2_MODELS.unet, weight_dtype: "default" }),
+        "24": node("VAEEncodeTiled", { pixels: ["21", 0], vae: ["22", 0], tile_size: 512, overlap: 128, temporal_size: 4096, temporal_overlap: 8 }),
+        "25": node("SeedVR2Conditioning", { model: ["23", 0], vae_conditioning: ["24", 0] }),
+        "26": node("KSampler", { model: ["23", 0], positive: ["25", 0], negative: ["25", 1], latent_image: ["24", 0], seed: input.seed, steps: 1, cfg: 1, sampler_name: "euler", scheduler: "simple", denoise: 1 }),
+        "27": node("VAEDecodeTiled", { samples: ["26", 0], vae: ["22", 0], tile_size: 512, overlap: 128, temporal_size: 4096, temporal_overlap: 8 }),
+        "28": node("SeedVR2PostProcessing", { images: ["27", 0], original_resized_images: ["20", 0], color_correction_method: "wavelet" }),
+    };
 }
 
 function validateQwenInput(input: QwenImageWorkflowInput) {
@@ -83,4 +111,5 @@ function validateQwenInput(input: QwenImageWorkflowInput) {
         }
     }
     if (!Number.isInteger(input.count) || input.count < 1 || input.count > 15) throw new Error("生成张数需要是 1–15 的整数。");
+    if (input.upscaleLongEdge !== 0 && (!Number.isInteger(input.upscaleLongEdge) || input.upscaleLongEdge < 2048 || input.upscaleLongEdge > 8192)) throw new Error("4K 超分目标长边需要在 2048–8192 之间。");
 }

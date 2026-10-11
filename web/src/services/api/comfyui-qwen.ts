@@ -33,6 +33,7 @@ export async function runQwenImageGeneration(config: AiConfig, prompt: string, r
         seed,
         count,
         images: [] as string[],
+        upscaleLongEdge: 0,
         outputPrefix: `ai-creative-studio/${clientId}`,
     };
     // 文生图按 batch 一次采样；图像编辑没有可复制的批量 latent，按张数提交多个任务。
@@ -40,10 +41,13 @@ export async function runQwenImageGeneration(config: AiConfig, prompt: string, r
     if (references.length) {
         const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
         const images = await Promise.all(files.map((file) => uploadReference(file, clientId, signal)));
-        for (let index = 0; index < count; index += 1) graphs.push({ ...common, seed: seed + index, images });
+        const upscale = is4kEditResolution(config) ? QWEN_IMAGE_4K_LONG_EDGE : 0;
+        for (let index = 0; index < count; index += 1) graphs.push({ ...common, seed: seed + index, images, upscaleLongEdge: upscale });
     } else {
         const size = resolveOutputSize(config.size);
-        graphs.push({ ...common, width: size.width, height: size.height });
+        // 4K 档：原生按目标一半采样（约 2K），再由 SeedVR2 超分到目标长边。
+        const native = is4kSize(config.size) ? { width: align32(size.width / 2), height: align32(size.height / 2) } : size;
+        graphs.push({ ...common, width: native.width, height: native.height, upscaleLongEdge: is4kSize(config.size) ? Math.max(size.width, size.height) : 0 });
     }
     const ids = await Promise.all(graphs.map((graph) => submitQwenPrompt(graph, signal)));
     return collectQwenImages(ids, signal);
@@ -120,13 +124,26 @@ export function resolveOutputSize(size: string) {
     return { width: align32(source.width), height: align32(source.height) };
 }
 
-/** 图像编辑分辨率预算：0 表示保持参考图原始尺寸。 */
+/** 图像编辑分辨率预算：0 表示保持参考图原始尺寸；4K(4096) 是超分档，原生按 2K 预算采样。 */
 export function resolveEditResolution(config: AiConfig) {
     const value = (config.imageResolution || "").trim();
     if (!value || value === "auto") return 1024;
     if (value === "0" || value === "original") return 0;
+    if (value === "4096") return 2048;
     return align32(Math.round(Number(value) || 1024));
 }
+
+export function is4kEditResolution(config: AiConfig) {
+    return (config.imageResolution || "").trim() === "4096";
+}
+
+/** 文生图 4K 判定：按所选/输入尺寸的长边是否达到 4K 档。 */
+export function is4kSize(size: string) {
+    return inferMediaScale(size) === "4k";
+}
+
+/** 4K 超分档的目标长边。 */
+export const QWEN_IMAGE_4K_LONG_EDGE = 4096;
 
 function resolveSeed(config: AiConfig) {
     const value = config.imageSeed?.trim();

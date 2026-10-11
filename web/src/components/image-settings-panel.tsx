@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { isQwenImage21, QWEN_IMAGE_21_DEFAULT_STEPS, QWEN_IMAGE_21_MAX_STEPS } from "@/constant/comfyui";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaRatioOptions, mediaScaleOptions, readMediaDimensions } from "@/lib/media-size";
+import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaRatioOptions, mediaScaleOptions, parseAspectRatio, readMediaDimensions } from "@/lib/media-size";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
@@ -21,6 +21,7 @@ const qwenResolutionOptions = [
     { value: "1024", label: "1K" },
     { value: "1536", label: "1.5K" },
     { value: "2048", label: "2K" },
+    { value: "4096", label: "4K" },
     { value: "0", label: "原图" },
 ];
 
@@ -54,6 +55,20 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const editResolution = config.imageResolution || "1024";
     const applySize = (scale: string, ratio: string) => onConfigChange("size", computeMediaSize(scale, ratio));
     const selectScale = (scale: string) => applySize(scale, selectedRatio === "auto" ? "1:1" : selectedRatio);
+    // Qwen 的 4K 档按「长边 4096 × 所选比例」记录最终尺寸，实际原生采样取一半，再由 SeedVR2 超分回来。
+    const selectQwenScale = (scale: string) => {
+        if (scale !== "4k") {
+            selectScale(scale);
+            return;
+        }
+        const parsed = parseAspectRatio(selectedRatio === "auto" ? "1:1" : selectedRatio);
+        if (!parsed) {
+            onConfigChange("size", "4096x4096");
+            return;
+        }
+        const shortSide = Math.ceil((4096 * Math.min(parsed.width, parsed.height)) / Math.max(parsed.width, parsed.height) / 32) * 32;
+        onConfigChange("size", parsed.width >= parsed.height ? `4096x${shortSide}` : `${shortSide}x4096`);
+    };
     const selectRatio = (ratio: string) => applySize(selectedScale, ratio);
     const updateDimension = (key: "width" | "height", value: number | null) => {
         const next = Math.max(1, Math.floor(value || dimensions[key] || 1024));
@@ -108,13 +123,13 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <span className="text-lg opacity-45">↔</span>
                         <DimensionInput prefix="H" value={dimensions.height} disabled={selectedRatio === "auto"} theme={theme} alignToStep={snapDimensionToStep} step={dimensionStep} onChange={(value) => updateDimension("height", value)} />
                     </div>
-                    {qwen ? <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>原生支持最高 2K（2048×2048）；更大尺寸可通过上方宽高自定义，耗时明显增加。</p> : null}
+                    {qwen ? <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>1K/2K 为原生采样；4K 先按一半尺寸原生采样，再经 SeedVR2 超分到所选尺寸（长边 4096），耗时与显存开销更高。</p> : null}
                 </div>
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.resolution")}</SettingTitle>
-                    <div className={`grid ${qwen ? "grid-cols-2" : "grid-cols-4"} gap-2.5`}>
-                        {(qwen ? [{ value: "1k", label: "1K" }, { value: "2k", label: "2K" }] : mediaScaleOptions.map((value) => ({ value, label: value === "auto" ? t("settingsPanels.common.auto") : value }))).map((item) => (
-                            <OptionPill key={item.value} selected={selectedScale === item.value} theme={theme} onClick={() => selectScale(item.value)}>
+                    <div className={`grid ${qwen ? "grid-cols-3" : "grid-cols-4"} gap-2.5`}>
+                        {(qwen ? [{ value: "1k", label: "1K" }, { value: "2k", label: "2K" }, { value: "4k", label: "4K" }] : mediaScaleOptions.map((value) => ({ value, label: value === "auto" ? t("settingsPanels.common.auto") : value }))).map((item) => (
+                            <OptionPill key={item.value} selected={selectedScale === item.value} theme={theme} onClick={() => (qwen ? selectQwenScale(item.value) : selectScale(item.value))}>
                                 {item.label}
                             </OptionPill>
                         ))}
@@ -141,7 +156,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 {qwen ? (
                     <div className="space-y-2.5">
                         <SettingTitle color={theme.node.muted}>编辑分辨率</SettingTitle>
-                        <div className="grid grid-cols-5 gap-2.5">
+                        <div className="grid grid-cols-3 gap-2.5">
                             {qwenResolutionOptions.map((item) => (
                                 <OptionPill key={item.value} selected={editResolution === item.value} theme={theme} onClick={() => onConfigChange("imageResolution", item.value)}>
                                     {item.label}
@@ -149,7 +164,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                             ))}
                             <ResolutionInput value={editResolution === "0" ? "" : editResolution} theme={theme} onChange={(value) => onConfigChange("imageResolution", value)} />
                         </div>
-                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>图像编辑时参考图按比例缩到该像素预算内（保持宽高比）；选「原图」保持原始尺寸。输出尺寸跟随第一张参考图。</p>
+                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>参考图按比例缩到该像素预算内（保持宽高比）；「原图」保持原始尺寸；「4K」按 2K 预算原生编辑后经 SeedVR2 超分到 4096 长边。输出尺寸跟随第一张参考图。</p>
                     </div>
                 ) : null}
                 {!qwen ? (
