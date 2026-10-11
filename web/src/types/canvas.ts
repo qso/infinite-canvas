@@ -1,3 +1,5 @@
+import type { MusicAnalysisRequest, MusicAnalysisResult, MusicGenerationDraft, MusicGenerationOutput, MusicGenerationRequest, MusicTaskStatus } from "@/constant/music";
+
 export type Position = {
     x: number;
     y: number;
@@ -15,6 +17,7 @@ export enum CanvasNodeType {
     Config = "config",
     Video = "video",
     Audio = "audio",
+    Music = "music",
     Group = "group",
 }
 
@@ -74,6 +77,31 @@ export type CanvasNodeMetadata = {
     audioFormat?: string;
     audioSpeed?: string;
     audioInstructions?: string;
+    musicDraft?: MusicGenerationDraft;
+    musicAnalysisId?: string;
+    musicAnalysisRequest?: MusicAnalysisRequest;
+    musicAnalysisStatus?: MusicTaskStatus;
+    musicAnalysisStage?: string;
+    musicAnalysis?: MusicAnalysisResult;
+    musicAnalysisNodeId?: string;
+    musicAnalysisStorageKey?: string;
+    musicAnalysisMissing?: boolean;
+    musicReferenceStyle?: string;
+    musicAudioId?: string;
+    musicAudioStorageKey?: string;
+    musicRequest?: MusicGenerationRequest;
+    musicTaskId?: string;
+    musicTaskEndpoint?: "/yue2";
+    musicTaskStatus?: MusicTaskStatus;
+    musicTaskStage?: string;
+    musicTaskMissing?: boolean;
+    musicSeed?: number;
+    musicOutput?: MusicGenerationOutput;
+    musicScore?: string;
+    musicError?: string;
+    musicSavePending?: boolean;
+    musicContentUnavailable?: boolean;
+    musicLastFailure?: { id: string; request: MusicGenerationRequest; error: string; seed?: number };
     references?: string[];
     naturalWidth?: number;
     naturalHeight?: number;

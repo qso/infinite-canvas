@@ -1,5 +1,6 @@
 import { defaultConfig, resolveModelForCapability, type AiConfig } from "@/stores/use-config-store";
 import i18n from "@/i18n";
+import { DEFAULT_MUSIC_DRAFT, MUSIC_MODEL, type MusicGenerationDraft, type MusicGenerationRequest } from "@/constant/music";
 import { ensureImagePreview, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { imageMetadata, referenceUrl } from "@/lib/canvas/canvas-node-factory";
@@ -47,7 +48,7 @@ export async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
         nodes.map(async (node) => {
             const metadata = node.metadata;
             const content = metadata?.content;
-            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && metadata?.storageKey) return { ...node, metadata: { ...metadata, content: await resolveMediaUrl(metadata.storageKey, content) } };
+            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio || node.type === CanvasNodeType.Music) && metadata?.storageKey) return { ...node, metadata: { ...metadata, content: await resolveMediaUrl(metadata.storageKey, node.type === CanvasNodeType.Music ? "" : content) } };
             if (node.type !== CanvasNodeType.Image || !metadata || !content) return node;
             const images = await Promise.all(
                 (metadata.images || []).map(async (image) => {
@@ -127,6 +128,46 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
     };
 }
 
+export function musicDraftFromRequest(request: MusicGenerationRequest): MusicGenerationDraft {
+    return { style: request.style, lyrics: request.lyrics, cot: request.cot, outputType: request.output_type || "song", seed: request.seed === null ? "" : String(request.seed), cfgScale: request.cfg_scale === null ? "" : String(request.cfg_scale), steps: String(request.steps), temperature: String(request.temperature), abc: request.abc || "", format: request.format, creationMode: request.reference?.mode || "original", abcSampling: { temperature: String(request.abc_temperature ?? 0.7), topP: String(request.abc_top_p ?? 0.9), topK: String(request.abc_top_k ?? 30), repetitionPenalty: String(request.abc_repetition_penalty ?? 1.005) }, semanticSampling: { topP: String(request.top_p ?? 0.95), topK: String(request.top_k ?? 100), repetitionPenalty: String(request.repetition_penalty ?? 1.2) } };
+}
+
+export function readMusicDraft(metadata?: CanvasNodeMetadata): MusicGenerationDraft {
+    return metadata?.musicDraft || (metadata?.musicRequest ? musicDraftFromRequest(metadata.musicRequest) : DEFAULT_MUSIC_DRAFT);
+}
+
+export function selectMusicReference(node: CanvasNodeData, references: CanvasNodeData[]) {
+    return references.find((reference) => reference.id === readMusicDraft(node.metadata).referenceNodeId) || (references.length === 1 ? references[0] : undefined);
+}
+
+export function readMusicReferenceAnalysis(node: CanvasNodeData, reference?: CanvasNodeData) {
+    const metadata = node.metadata;
+    return reference && metadata?.musicAnalysisId && metadata.musicAnalysisStatus === "completed" && metadata.musicAnalysisNodeId === reference.id && metadata.musicAnalysisStorageKey === (reference.metadata?.storageKey || reference.metadata?.content) ? metadata.musicAnalysis : undefined;
+}
+
+export function buildMusicGenerationRequest(id: string, draft: MusicGenerationDraft, connectedLyrics = ""): MusicGenerationRequest {
+    const seed = draft.seed.trim() ? Number(draft.seed) : null;
+    const cfgScale = draft.cfgScale.trim() ? Number(draft.cfgScale) : null;
+    const steps = Number(draft.steps);
+    const temperature = Number(draft.temperature);
+    const outputType = draft.outputType || "song";
+    const cot = outputType === "instrumental" && draft.cot === "off" ? "full" : draft.cot;
+    if (!draft.style.trim()) throw new Error(i18n.t("canvas.music.styleRequired"));
+    if (seed !== null && (!Number.isSafeInteger(seed) || seed < 0)) throw new Error(i18n.t("canvas.music.invalidSeed"));
+    if (!Number.isInteger(steps) || steps <= 0) throw new Error(i18n.t("canvas.music.invalidSteps"));
+    if (cfgScale !== null && (!Number.isFinite(cfgScale) || cfgScale < 0 || cfgScale > 20)) throw new Error(i18n.t("canvas.music.invalidCfg"));
+    if (!draft.temperature.trim() || !Number.isFinite(temperature) || temperature < 0 || temperature > 5) throw new Error(i18n.t("canvas.music.invalidTemperature"));
+    const abc = draft.abcSampling;
+    const semantic = draft.semanticSampling;
+    const sampling = { abc_temperature: Number(abc?.temperature ?? 0.7), abc_top_p: Number(abc?.topP ?? 0.9), abc_top_k: Number(abc?.topK ?? 30), abc_repetition_penalty: Number(abc?.repetitionPenalty ?? 1.005), top_p: Number(semantic?.topP ?? 0.95), top_k: Number(semantic?.topK ?? 100), repetition_penalty: Number(semantic?.repetitionPenalty ?? 1.2) };
+    if (!Object.values(sampling).every(Number.isFinite) || sampling.abc_temperature < 0 || sampling.abc_temperature > 5 || sampling.abc_top_p <= 0 || sampling.abc_top_p > 1 || sampling.top_p <= 0 || sampling.top_p > 1 || !Number.isInteger(sampling.abc_top_k) || sampling.abc_top_k < 1 || !Number.isInteger(sampling.top_k) || sampling.top_k < 1 || sampling.abc_repetition_penalty <= 0 || sampling.repetition_penalty <= 0) throw new Error(i18n.t("canvas.music.invalidSampling"));
+    return Object.freeze({ id, model: MUSIC_MODEL, style: draft.style.trim(), lyrics: outputType === "instrumental" ? "" : draft.lyrics.trim() ? draft.lyrics : connectedLyrics, cot, output_type: outputType, seed, cfg_scale: cfgScale, steps, temperature, abc: cot !== "off" && draft.abc.trim() ? draft.abc : null, format: draft.format, ...sampling });
+}
+
+export function hasResumableMusicTask(node: CanvasNodeData) {
+    return node.type === CanvasNodeType.Music && Boolean(node.metadata?.musicTaskId) && !node.metadata?.content && node.metadata?.musicTaskStatus !== "failed" && !node.metadata?.musicContentUnavailable;
+}
+
 export function hasResumableVideoTask(node: CanvasNodeData) {
     return node.type === CanvasNodeType.Video && Boolean(node.metadata?.videoTaskId) && !node.metadata?.content;
 }
@@ -134,7 +175,7 @@ export function hasResumableVideoTask(node: CanvasNodeData) {
 export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     return nodes.map((node) =>
         node.metadata?.status === "loading"
-            ? hasResumableVideoTask(node)
+            ? hasResumableVideoTask(node) || hasResumableMusicTask(node) || node.type === CanvasNodeType.Music && Boolean(node.metadata.musicAnalysisId) && (node.metadata.musicAnalysisStatus === "queued" || node.metadata.musicAnalysisStatus === "running")
                 ? node
                 : {
                       ...node,
@@ -182,7 +223,7 @@ export function sourceNodeReferenceImages(node: CanvasNodeData | null) {
 }
 
 export function isAudioFile(file: File) {
-    return file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name);
+    return file.type.startsWith("audio/") || /\.(mp3|wav|flac)$/i.test(file.name);
 }
 
 export function buildAngleLabel(params: CanvasImageAngleParams) {

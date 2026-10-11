@@ -29,3 +29,32 @@ Common locations:
 - Canvas, pages, and interactions: `web/`
 - Prompt caching: `web/src/services/api/prompts.ts`
 - Documentation content: `docs/content/docs/`
+
+## 云端 YuE2 音乐环境
+
+音乐服务独立部署在第二台 RTX 5090，不影响原来的 ComfyUI 图片/视频环境。当前基础环境保留 Python 3.13.15、Node 24.20.0 和 CUDA 13.0；YuE2 单独使用 `/var/tmp/audio-studio/env`，固定 PyTorch 2.10.0+cu130、Transformers 4.57.6 和官方 inference 0.1.5，以符合模型依赖。完整 BF16 主模型与 FP32 官方默认 VAE 不做量化或蒸馏。
+
+| 云端路径 | 用途 |
+| --- | --- |
+| `/project/daixinliang/audio-studio/services/yue2` | 服务源码与安装、启动、恢复脚本 |
+| `/project/daixinliang/audio-studio/models` | 固定版本的完整 YuE2-3B 和 YuE2-Vae，保留官方 SHA256 清单 |
+| `/project/daixinliang/audio-studio/outputs` | WAV/FLAC 与生成 ABC 乐谱 |
+| `/project/daixinliang/audio-studio/jobs/yue2.sqlite3` | 原始请求、实际种子、任务阶段与结果 |
+| `/project/daixinliang/audio-studio/recover` | 依赖清单、受限权限 token 与恢复快照 |
+| `/var/tmp/audio-studio` | 快速运行环境、临时文件、下载/编译缓存与日志，容器重建可能丢失 |
+
+源码位于仓库 `services/yue2/`。在同类云端机器上确认 Python、GPU、持久卷权限与剩余空间后，将该目录放到持久卷，再运行 `bash deploy.sh`。它只安装独立环境，不替换已有 Python、Node、Jupyter 或宿主驱动。当前网络需要镜像时可设置 `HF_ENDPOINT=https://hf-mirror.com`、`PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple` 和 `YUE2_TORCH_URL` 为同版本 wheel 的镜像地址；Torch 与主模型文件仍按固定 SHA256 校验。大模型在本地盘下载，再单流写入持久卷并延迟重新核验，避免 CubeFS 大文件截断。
+
+服务在云端 `127.0.0.1:8190` 监听，通过 Jupyter 的 `/proxy/8190` 访问。手动启动使用 `setsid bash /project/daixinliang/audio-studio/services/yue2/start.sh </dev/null >>/var/tmp/audio-studio/api.log 2>&1 &`，不依赖 Notebook 内核。`GET /health` 查看就绪情况；生成与下载接口必须提供 Bearer token。
+
+本地 `web/.env.local` 的 `YUE2_REMOTE_URL` 仅保存固定目标地址；token 放在被 Git 忽略的 `data/yue2-api.token`（文件权限 `0600`），或由运行 Vite 的进程传入 `YUE2_API_TOKEN`。Vite 的 `/yue2` 转发仅接受本机画布请求，并在服务端注入 token，不把云端密钥发给浏览器。当前已接入本地 Vite 开发/预览，Docker/Nginx 转发尚未实现。画布项目和音频副本仍保存在浏览器本地，不代表云同步。
+
+音乐 API 使用 `POST /v1/music/generations` 提交，`GET /v1/music/generations/{id}` 查询，`/content` 下载音频，`/score` 读取生成乐谱。客户端 UUID 与原始参数绑定，相同请求不会重复生成；随机种子在首次入队时确定，查询结果中的实际种子不会改写原请求的 `seed: null`。同一时刻生成一首，其余任务持久排队；不自动重试生成，不按条数静默删除历史。模型/服务中断后，已运行任务报中断失败，未运行任务保留；前端停止查询不会停止 GPU 生成。
+
+参考音频接口为 `POST /v1/music/audio` 上传、`POST /v1/music/analyses` 提交转谱／曲风／歌词分析、`GET /v1/music/analyses/{id}` 查询；生成通过 `reference.analysis_id` 引用完成结果。SheetSage2 + MERT 将音频转为 ABC，MusicFlamingo 提取曲风文字和歌词，已有音乐优先复用原生成乐谱。YuE2 使用乐谱和风格文字重新创作，不直接接收参考波形，不承诺声线克隆或完整原编曲。`deploy.sh` 会复制已有参考源码，但基础部署不自动安装参考环境；需要参考能力时，在确认依赖与资源后用基础 Python 3.13 执行 `bootstrap-reference.py`，分别创建 `sheetsage-env`、`flamingo-env` 和 ffmpeg 环境。`/health` 的参考能力标记不是实际转谱／生成成功的证明。
+
+纯音乐走 `output_type: "instrumental"`：服务先按歌曲链路解析参考并强制空歌词、附加 Instrumental 风格前缀，规划一次乐谱后调用 `services/yue2/instrumental/` 的官方转谱工具（固定 revision `1647252d` 的 MIT 脚本，标准库实现，仅 Vocal 旋律转移到器乐声部、Vocal 保留休止与和弦）重建固定谱前缀，再一次性生成音频；转换或谱面校验失败任务直接失败并保留原始乐谱，不降级为带人声生成。任务输出目录保留 `source-score.abc`、`conversion/` 与最终 `score.abc`，`GET /score?variant=used|source` 分别下载最终谱与原始谱。乐谱无人声音符不等于音频听感无人声，成品仍需人工听验；模型没有原生时长参数。该能力需重新部署 `services/yue2` 后在远端生效。
+
+恢复资料已包含独立推理环境及其依赖的基础 Python、Node、CUDA，但当前快照不包含参考分析的独立环境、Python 3.11 和 ffmpeg。`bash recover.sh snapshot` 创建快照，已有快照时拒绝覆盖；`bash recover.sh restore` 先校验 SHA256，并在任何目标运行目录已存在时拒绝覆盖。尚未模拟整个容器重建，恢复后的实际服务启动仍需验收。
+
+已用完整默认模型生成一首原创短样例，得到 37.479 秒、48kHz 双声道 FLOAT32 WAV 和 ABC 乐谱；重复 UUID 保持一条任务记录，参数冲突返回 409。该结果只证明这次链路可用，不代表完整长歌、其他规划模式或高级参数效果已验收。权重使用 CC BY-NC 4.0，模型许可与本项目代码许可独立。
