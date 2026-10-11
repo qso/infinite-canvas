@@ -1,0 +1,29 @@
+AGENTS.md
+  eb358895d9614f99 74-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "26ec254690802b5ad40da746a197c2eab8b0f06c",
+  "prompts": {
+    "eb358895d9614f99": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "225dd70b-0741-4b83-962f-5802ec750646",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "AGENTS.md": {
+          "additions": 9,
+          "accepted_lines": 9
+        }
+      }
+    }
+  }
+}
