@@ -1,0 +1,89 @@
+web/src/services/api/comfyui-qwen.ts
+  e5cfb1f30ccea66b 6,22-32,53,56-57,59-63,129-149,152,154,160-167
+CHANGELOG.md
+  e5cfb1f30ccea66b 5-6
+web/src/lib/canvas/canvas-generation-helpers.ts
+  e5cfb1f30ccea66b 114-118,180-184,188
+web/src/components/canvas/canvas-image-settings-popover.tsx
+  e5cfb1f30ccea66b 8,35-36,72
+web/src/components/image-settings-panel.tsx
+  e5cfb1f30ccea66b 9,25,58-76,79-81,114-125,127-130,133,136-156,178-192,194
+web/src/lib/canvas/canvas-node-factory.ts
+  e5cfb1f30ccea66b 50-54
+docs/content/docs/progress/pending-test.mdx
+  e5cfb1f30ccea66b 10-11
+web/src/pages/canvas/project.tsx
+  e5cfb1f30ccea66b 10,69,302,730-810,897,2928,2930-2931,2933,3198,3293-3294,3364
+web/src/types/canvas.ts
+  e5cfb1f30ccea66b 41-42,66-70
+web/src/services/api/image.ts
+  e5cfb1f30ccea66b 100,701,768
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "8d253aa347c772fb2e8f37f0fe37a21dc20f2511",
+  "prompts": {
+    "e5cfb1f30ccea66b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "260e4db0-d0fa-4bed-a583-60f9fc15b254",
+        "model": "<synthetic>"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 275,
+      "total_deletions": 138,
+      "accepted_lines": 258,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "web/src/pages/canvas/project.tsx": {
+          "additions": 93,
+          "deletions": 32,
+          "accepted_lines": 93
+        },
+        "web/src/types/canvas.ts": {
+          "additions": 7,
+          "accepted_lines": 7
+        },
+        "web/src/services/api/comfyui-qwen.ts": {
+          "additions": 52,
+          "deletions": 31,
+          "accepted_lines": 52
+        },
+        "CHANGELOG.md": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "web/src/services/api/image.ts": {
+          "additions": 3,
+          "deletions": 3,
+          "accepted_lines": 3
+        },
+        "web/src/components/image-settings-panel.tsx": {
+          "additions": 95,
+          "deletions": 68,
+          "accepted_lines": 79
+        },
+        "web/src/components/canvas/canvas-image-settings-popover.tsx": {
+          "additions": 5,
+          "deletions": 3,
+          "accepted_lines": 4
+        },
+        "web/src/lib/canvas/canvas-generation-helpers.ts": {
+          "additions": 11,
+          "deletions": 1,
+          "accepted_lines": 11
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "web/src/lib/canvas/canvas-node-factory.ts": {
+          "additions": 5,
+          "accepted_lines": 5
+        }
+      }
+    }
+  }
+}
