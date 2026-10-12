@@ -1,0 +1,48 @@
+web/src/services/api/comfyui-qwen.ts
+  e5cfb1f30ccea66b 40-41,54-56,58-59,131-162,164-167,170-173,177-179,206-210
+CHANGELOG.md
+  e5cfb1f30ccea66b 5-6
+docs/content/docs/progress/pending-test.mdx
+  e5cfb1f30ccea66b 10-13
+web/src/services/api/comfyui-qwen-workflow.ts
+  e5cfb1f30ccea66b 7,10-11,44-45,64,76,111
+web/src/components/image-settings-panel.tsx
+  e5cfb1f30ccea66b 8,11,93-94,98-101,179,193,195,198-199,201,224,238,240,242-246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "31fd091e61a29d4a1b3fc83f4b674546746694e3",
+  "prompts": {
+    "e5cfb1f30ccea66b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "260e4db0-d0fa-4bed-a583-60f9fc15b254",
+        "model": "<synthetic>"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 91,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "web/src/services/api/comfyui-qwen-workflow.ts": {
+          "accepted_lines": 8
+        },
+        "web/src/components/image-settings-panel.tsx": {
+          "accepted_lines": 22
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "accepted_lines": 4
+        },
+        "CHANGELOG.md": {
+          "accepted_lines": 2
+        },
+        "web/src/services/api/comfyui-qwen.ts": {
+          "accepted_lines": 55
+        }
+      }
+    }
+  }
+}
