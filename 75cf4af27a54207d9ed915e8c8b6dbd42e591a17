@@ -1,0 +1,53 @@
+web/src/components/canvas/canvas-image-settings-popover.tsx
+  e5cfb1f30ccea66b 69,92,100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "75cf4af27a54207d9ed915e8c8b6dbd42e591a17",
+  "prompts": {
+    "e5cfb1f30ccea66b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "260e4db0-d0fa-4bed-a583-60f9fc15b254",
+        "model": "<synthetic>"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 94,
+      "total_deletions": 51,
+      "accepted_lines": 94,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "CHANGELOG.md": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 4,
+          "accepted_lines": 4
+        },
+        "web/src/services/api/comfyui-qwen.ts": {
+          "additions": 55,
+          "deletions": 26,
+          "accepted_lines": 55
+        },
+        "web/src/components/canvas/canvas-image-settings-popover.tsx": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 3
+        },
+        "web/src/services/api/comfyui-qwen-workflow.ts": {
+          "additions": 8,
+          "deletions": 4,
+          "accepted_lines": 8
+        },
+        "web/src/components/image-settings-panel.tsx": {
+          "additions": 22,
+          "deletions": 20,
+          "accepted_lines": 22
+        }
+      }
+    }
+  }
+}
