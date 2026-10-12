@@ -4,7 +4,7 @@ import { Settings2 } from "lucide-react";
 import { Button } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
+import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel, type ImageReferenceInfo } from "@/components/image-settings-panel";
 import { isQwenImage21 } from "@/constant/comfyui";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -19,9 +19,10 @@ type CanvasImageSettingsPopoverProps = {
     getPopupContainer?: (triggerNode: HTMLElement) => HTMLElement;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
     autoAdjustOverflow?: boolean;
+    imageReferences?: ImageReferenceInfo;
 };
 
-export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft" }: CanvasImageSettingsPopoverProps) {
+export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft", imageReferences }: CanvasImageSettingsPopoverProps) {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
@@ -32,8 +33,11 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
     const qwen = isQwenImage21(config.model || config.imageModel);
+    const hasImageReferences = (imageReferences?.count || 0) > 0;
     const qwenResolutionLabels: Record<string, string> = { "0": "跟随原图", "1024": "1K", "1536": "1.5K", "2048": "2K", "4096": "4K" };
     const qwenResolutionLabel = qwenResolutionLabels[config.imageResolution || "1024"] || `${config.imageResolution}px`;
+    // 「跟随原图」只在有参考图（编辑模式）时有意义；文生图下按 1K 显示。
+    const qwenSummaryResolution = !hasImageReferences && (config.imageResolution || "1024") === "0" ? "1K" : qwenResolutionLabel;
     const updateOpen = (nextOpen: boolean) => {
         setOpen(nextOpen);
         onOpenChange?.(nextOpen);
@@ -69,7 +73,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
             <span ref={buttonRef} className="inline-flex min-w-0">
                 <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[180px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => updateOpen(!open)}>
                     <span className="truncate">
-                        {qwen ? `${qwenResolutionLabel} · ${imageSizeLabel(activeSize)}` : `${imageQualityLabel(quality)} · ${imageSizeLabel(activeSize)}`} · {t("canvas.controls.images", { count })}
+                        {qwen ? `${qwenSummaryResolution} · ${imageSizeLabel(activeSize)}` : `${imageQualityLabel(quality)} · ${imageSizeLabel(activeSize)}`} · {t("canvas.controls.images", { count })}
                     </span>
                 </Button>
             </span>
@@ -123,7 +127,7 @@ function ImageSettingsPortal({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
+            <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" imageReferences={imageReferences} />
         </div>,
         document.body,
     );

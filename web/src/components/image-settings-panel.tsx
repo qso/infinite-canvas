@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { ConfigProvider, Input, InputNumber, Switch } from "antd";
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { isQwenImage21, QWEN_IMAGE_21_DEFAULT_STEPS, QWEN_IMAGE_21_MAX_STEPS } from "@/constant/comfyui";
 import { type CanvasTheme } from "@/lib/canvas-theme";
+import { readImageMeta } from "@/lib/image-utils";
 import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaRatioOptions, mediaScaleOptions, parseAspectRatio, parsePixelSize, readMediaDimensions } from "@/lib/media-size";
 import type { AiConfig } from "@/stores/use-config-store";
 
@@ -30,6 +31,7 @@ export const imageAspectOptions = mediaRatioOptions.map((item) => ({ value: item
 export const imageScaleOptions = mediaScaleOptions.map((value) => ({ value, label: value === "auto" ? i18n.t("settingsPanels.common.auto") : value }));
 
 type ImageConfigKey = "quality" | "size" | "count" | "background" | "imageSteps" | "imageCfg" | "imageSeed" | "imageNegative" | "imageResolution";
+export type ImageReferenceInfo = { count: number; firstUrl?: string };
 type ImageSettingsPanelProps = {
     config: AiConfig;
     onConfigChange: (key: ImageConfigKey, value: string) => void;
@@ -38,13 +40,32 @@ type ImageSettingsPanelProps = {
     className?: string;
     maxCount?: number;
     quickCount?: number;
+    /** 已连接的参考图（按生成时的顺序）；有参考图即为图像编辑模式，输出跟随第一张。 */
+    imageReferences?: ImageReferenceInfo;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, imageReferences }: ImageSettingsPanelProps) {
     const { t } = useTranslation();
     const qwen = isQwenImage21(config.model || config.imageModel);
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const dimensionStep = qwen ? 32 : 16;
+    const hasImageReferences = (imageReferences?.count || 0) > 0;
+    const [firstReferenceSize, setFirstReferenceSize] = useState<{ width: number; height: number } | null>(null);
+    useEffect(() => {
+        const url = hasImageReferences ? imageReferences?.firstUrl : undefined;
+        if (!url) {
+            setFirstReferenceSize(null);
+            return;
+        }
+        let alive = true;
+        void readImageMeta(url).then((meta) => {
+            if (alive) setFirstReferenceSize({ width: meta.width, height: meta.height });
+        });
+        return () => {
+            alive = false;
+        };
+    }, [hasImageReferences, imageReferences?.firstUrl]);
+    const followOriginal = qwen && hasImageReferences && (config.imageResolution || "1024") === "0";
     const quality = config.quality || "auto";
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
@@ -53,6 +74,18 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const selectedRatio = inferMediaRatio(activeSize);
     const dimensions = readMediaDimensions(activeSize, selectedScale, selectedRatio);
     const editResolution = config.imageResolution || "1024";
+    // 图像编辑的预估输出：跟随第 1 张参考图的比例（与云端 TextEncode 的缩放数学一致，32 对齐；4K 档为超分后的长边）。
+    const editOutputSize = (() => {
+        if (!qwen || !hasImageReferences || !firstReferenceSize) return null;
+        const ratio = firstReferenceSize.width / firstReferenceSize.height;
+        if (followOriginal) return { width: Math.max(32, Math.round(firstReferenceSize.width / 32) * 32), height: Math.max(32, Math.round(firstReferenceSize.height / 32) * 32) };
+        if (Number(editResolution) >= 4096) {
+            const shortSide = Math.max(32, Math.round((4096 * Math.min(ratio, 1 / ratio)) / 32) * 32);
+            return ratio >= 1 ? { width: 4096, height: shortSide } : { width: shortSide, height: 4096 };
+        }
+        const budget = Math.min(2048, Math.max(256, Math.round(Number(editResolution) || 1024)));
+        return { width: Math.max(32, Math.round(Math.sqrt(budget * budget * ratio) / 32) * 32), height: Math.max(32, Math.round(Math.sqrt(budget * budget / ratio) / 32) * 32) };
+    })();
     const applySize = (scale: string, ratio: string) => onConfigChange("size", computeMediaSize(scale, ratio));
     const selectScale = (scale: string) => applySize(scale, selectedRatio === "auto" ? "1:1" : selectedRatio);
     const selectRatio = (ratio: string) => (qwen ? onConfigChange("size", ratio) : applySize(selectedScale, ratio));
@@ -136,14 +169,18 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     {qwen ? (
                         <>
                             <div className="grid grid-cols-3 gap-2.5">
-                                {qwenResolutionOptions.map((item) => (
+                                {(hasImageReferences ? qwenResolutionOptions : qwenResolutionOptions.filter((item) => item.value !== "0")).map((item) => (
                                     <OptionPill key={item.value} selected={editResolution === item.value} theme={theme} onClick={() => selectQwenResolution(item.value)}>
                                         {item.label}
                                     </OptionPill>
                                 ))}
                                 <ResolutionInput value={qwenResolutionOptions.some((item) => item.value === editResolution) ? "" : editResolution} theme={theme} onChange={(value) => selectQwenResolution(value.trim() || "1024")} />
                             </div>
-                            <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>决定即将生成图片的分辨率。1K/1.5K/2K 是像素预算（1K≈1024²、2K≈2048²），文生图配合宽高比得到下方「输出尺寸」，图像编辑则把参考图缩到该预算内并跟随其比例；「跟随原图」仅编辑时生效（保持参考图原始尺寸）；「4K」先原生 2K 采样再经 SeedVR2 超分到长边 4096，耗时更高。</p>
+                            <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                                {hasImageReferences
+                                    ? "1K/1.5K/2K 是像素预算，输出跟随第 1 张参考图的比例；「跟随原图」保持第 1 张参考图的原始尺寸；「4K」先原生 2K 采样再经 SeedVR2 超分到长边 4096，耗时更高。"
+                                    : "1K/1.5K/2K 是像素预算（1K≈1024²、2K≈2048²），配合宽高比得到下方「输出尺寸」；「4K」先原生 2K 采样再经 SeedVR2 超分到长边 4096，耗时更高。连接参考图后可切换为跟随原图。"}
+                            </p>
                         </>
                     ) : (
                         <div className="grid grid-cols-4 gap-2.5">
@@ -155,25 +192,38 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </div>
                     )}
                 </div>
-                <div className="space-y-2.5">
-                    <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.aspectRatio")}</SettingTitle>
-                    <div className="grid grid-cols-4 gap-2.5">
-                        {mediaRatioOptions.map((item) => (
-                            <button
-                                key={item.value}
-                                type="button"
-                                className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border bg-transparent text-sm transition hover:opacity-80"
-                                style={{ borderColor: selectedRatio === item.value ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}
-                                onMouseDown={(event) => event.stopPropagation()}
-                                onClick={() => selectRatio(item.value)}
-                            >
-                                <AspectIcon width={item.width} height={item.height} color={theme.node.text} />
-                                <span>{item.value === "auto" ? t("settingsPanels.common.auto") : item.value}</span>
-                            </button>
-                        ))}
+                {qwen && hasImageReferences ? (
+                    <div className="space-y-2.5">
+                        <SettingTitle color={theme.node.muted}>输出尺寸</SettingTitle>
+                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                            {(() => {
+                                const sizeText = editOutputSize ? (followOriginal ? `：约 ${editOutputSize.width}×${editOutputSize.height}（32 对齐）` : `，输出约 ${editOutputSize.width}×${editOutputSize.height}`) : imageReferences?.firstUrl ? "（正在读取参考图尺寸…）" : "";
+                                return followOriginal ? `保持第 1 张参考图的原始尺寸${sizeText}。` : `按分辨率预算缩放第 1 张参考图${sizeText}。`;
+                            })()}
+                            {(imageReferences?.count || 0) > 1 ? `其余 ${(imageReferences?.count || 0) - 1} 张参考图只作为内容参考，不影响输出尺寸；提示词里可用 <image1>、<image2> 引用。` : "提示词里可用 <image1> 引用。"}
+                        </p>
                     </div>
-                </div>
-                {qwen ? (
+                ) : (
+                    <div className="space-y-2.5">
+                        <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.aspectRatio")}</SettingTitle>
+                        <div className="grid grid-cols-4 gap-2.5">
+                            {mediaRatioOptions.map((item) => (
+                                <button
+                                    key={item.value}
+                                    type="button"
+                                    className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border bg-transparent text-sm transition hover:opacity-80"
+                                    style={{ borderColor: selectedRatio === item.value ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}
+                                    onMouseDown={(event) => event.stopPropagation()}
+                                    onClick={() => selectRatio(item.value)}
+                                >
+                                    <AspectIcon width={item.width} height={item.height} color={theme.node.text} />
+                                    <span>{item.value === "auto" ? t("settingsPanels.common.auto") : item.value}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                {qwen && !hasImageReferences ? (
                     <div className="space-y-2.5">
                         <div className="flex items-center justify-between gap-3">
                             <SettingTitle color={theme.node.muted}>输出尺寸</SettingTitle>
@@ -191,7 +241,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                             <span className="text-lg opacity-45">↔</span>
                             <DimensionInput prefix="H" value={activeDimensions.height} disabled={selectedRatio === "auto"} theme={theme} alignToStep={snapDimensionToStep} step={32} onChange={(value) => updateDimension("height", value)} />
                         </div>
-                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>文生图的最终输出尺寸（随上方分辨率和比例自动计算，可直接改）；图像编辑时输出跟随第一张参考图，此处不生效。</p>
+                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>文生图的最终输出尺寸（随上方分辨率和比例自动计算，可直接改）；连接参考图后输出跟随第 1 张参考图，此处自动锁定。</p>
                     </div>
                 ) : null}
                 {!qwen ? (

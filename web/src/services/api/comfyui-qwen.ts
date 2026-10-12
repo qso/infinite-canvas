@@ -144,9 +144,10 @@ export function resolveTextToImagePlan(config: AiConfig): { width: number; heigh
         const shortSide = align32((QWEN_IMAGE_4K_LONG_EDGE / 2 * Math.min(ratio.width, ratio.height)) / Math.max(ratio.width, ratio.height));
         return { width: landscape ? 2048 : shortSide, height: landscape ? shortSide : 2048, upscaleLongEdge: QWEN_IMAGE_4K_LONG_EDGE };
     }
-    // 1K/1.5K/2K 档 = 面积预算，与模型自己的参考图缩放数学一致。
+    // 1K/1.5K/2K 档 = 面积预算，与模型自己的参考图缩放数学一致；「跟随原图」只对编辑有意义，文生图回退 1K。
+    const budget = tier.budget || 1024;
     const aspect = ratio.width / ratio.height;
-    return { width: align32(Math.sqrt(tier.budget * tier.budget * aspect)), height: align32(Math.sqrt(tier.budget * tier.budget / aspect)), upscaleLongEdge: 0 };
+    return { width: align32(Math.sqrt(budget * budget * aspect)), height: align32(Math.sqrt(budget * budget / aspect)), upscaleLongEdge: 0 };
 }
 
 /** 图像编辑分辨率预算：0 表示保持参考图原始尺寸。 */

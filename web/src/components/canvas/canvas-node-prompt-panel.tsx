@@ -63,6 +63,11 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
         else onPromptChange(node.id, value);
     };
 
+    // 图像编辑的参考图（按生成顺序）：编辑已有图片且未开原地覆盖时，节点自身是第 1 张参考图。
+    const mentionImages = mentionReferences.filter((reference) => reference.kind === "image");
+    const selfIsReference = mode === "image" && hasImageContent && globalConfig.nodeRegenerateBehavior !== "overwrite";
+    const imageReferenceInfo = { count: mentionImages.length + (selfIsReference ? 1 : 0), firstUrl: selfIsReference ? node.metadata?.content : mentionImages[0]?.previewUrl };
+
     const submit = () => {
         const text = prompt.trim();
         if (!text || isRunning) return;
@@ -107,6 +112,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                                 config={config}
                                 placement="topLeft"
                                 buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3"
+                                imageReferences={imageReferenceInfo}
                                 onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
                                 onMissingConfig={() => openConfigDialog(true)}
                                 onOpenChange={onImageSettingsOpenChange}
