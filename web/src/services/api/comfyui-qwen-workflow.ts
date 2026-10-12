@@ -4,9 +4,11 @@ export type ComfyWorkflow = Record<string, { class_type: string; inputs: Record<
 export type QwenImageWorkflowInput = {
     prompt: string;
     negativePrompt: string;
-    /** 文生图输出宽高（32 对齐）；图像编辑时不使用。选 4K 时是折半后的原生采样宽高。 */
+    /** 采样画布宽高（32 对齐，4K 档为折半后的原生尺寸）；仅在 customLatent 时使用。 */
     width: number;
     height: number;
+    /** true：按 width/height 的空画布采样（文生图，或编辑时用户指定了比例/宽高）；false：编辑跟随第 1 张参考图的 latent。 */
+    customLatent: boolean;
     /** 图像编辑的像素预算：参考图按比例缩放到约 resolution²（32 对齐）；0 表示保持参考图原始尺寸。 */
     resolution: number;
     steps: number;
@@ -39,6 +41,8 @@ export const QWEN_IMAGE_MAX_REFERENCES = 10;
 export function buildQwenImageWorkflow(input: QwenImageWorkflowInput): ComfyWorkflow {
     validateQwenInput(input);
     const editing = input.images.length > 0;
+    // 文生图始终在自定义画布上采样；编辑时「跟随原图/自动比例」沿用首图 latent，选定比例或宽高后用空画布重新构图。
+    const customLatent = !editing || input.customLatent;
     const node = (class_type: string, inputs: Record<string, unknown>) => ({ class_type, inputs });
     const conditioning: Record<string, unknown> = {
         clip: ["2", 0],
@@ -57,7 +61,7 @@ export function buildQwenImageWorkflow(input: QwenImageWorkflowInput): ComfyWork
             model: ["4", 0],
             positive: ["5", 0],
             negative: ["5", 1],
-            latent_image: editing ? ["5", 2] : ["6", 0],
+            latent_image: customLatent ? ["6", 0] : ["5", 2],
             seed: input.seed,
             steps: input.steps,
             cfg: input.cfg,
@@ -69,7 +73,7 @@ export function buildQwenImageWorkflow(input: QwenImageWorkflowInput): ComfyWork
         ...(input.upscaleLongEdge ? buildSeedVR2Upscale(input) : {}),
         "9": node("SaveImage", { images: [input.upscaleLongEdge ? "28" : "8", 0], filename_prefix: input.outputPrefix }),
     };
-    if (!editing) graph["6"] = node("EmptyLatentImage", { width: input.width, height: input.height, batch_size: input.count });
+    if (customLatent) graph["6"] = node("EmptyLatentImage", { width: input.width, height: input.height, batch_size: editing ? 1 : input.count });
     input.images.forEach((image, index) => {
         const id = String(10 + index);
         graph[id] = node("LoadImage", { image });
@@ -104,7 +108,7 @@ function validateQwenInput(input: QwenImageWorkflowInput) {
     if (!Number.isFinite(input.cfg) || input.cfg < 1 || input.cfg > 10) throw new Error("CFG 需要在 1–10 之间，官方链路保持 1 即可。");
     if (!Number.isSafeInteger(input.seed) || input.seed < 0) throw new Error("随机种子需要是可精确表示的非负整数，请减小数值或留空随机。");
     if (input.resolution !== 0 && (!Number.isInteger(input.resolution) || input.resolution < 256 || input.resolution > 4096)) throw new Error("图像编辑分辨率预算需要在 256–4096 之间（32 的倍数），或选择保持原图。");
-    if (!input.images.length) {
+    if (!input.images.length || input.customLatent) {
         for (const [key, value] of [["宽", input.width], ["高", input.height]] as const) {
             if (!Number.isInteger(value) || value < 256 || value > 4096) throw new Error(`输出尺寸的${key}需要在 256–4096 之间（32 的倍数）。`);
             if (value % 32 !== 0) throw new Error(`输出尺寸的${key}需要是 32 的倍数。`);

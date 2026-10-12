@@ -5,9 +5,10 @@ import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { isQwenImage21, QWEN_IMAGE_21_DEFAULT_STEPS, QWEN_IMAGE_21_MAX_STEPS } from "@/constant/comfyui";
+import { alignQwen32, resolveQwenCanvasPlan } from "@/services/api/comfyui-qwen";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { readImageMeta } from "@/lib/image-utils";
-import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaRatioOptions, mediaScaleOptions, parseAspectRatio, parsePixelSize, readMediaDimensions } from "@/lib/media-size";
+import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaRatioOptions, mediaScaleOptions, parsePixelSize, readMediaDimensions } from "@/lib/media-size";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
@@ -89,18 +90,15 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const applySize = (scale: string, ratio: string) => onConfigChange("size", computeMediaSize(scale, ratio));
     const selectScale = (scale: string) => applySize(scale, selectedRatio === "auto" ? "1:1" : selectedRatio);
     const selectRatio = (ratio: string) => (qwen ? onConfigChange("size", ratio) : applySize(selectedScale, ratio));
+    // 预览与提交共用同一份画布计算（resolveQwenCanvasPlan），面板显示的就是实际采样尺寸。
+    const qwenPlan = qwen ? resolveQwenCanvasPlan(config, hasImageReferences) : null;
     const activeDimensions = qwen
         ? (() => {
               const pixels = parsePixelSize(activeSize);
-              if (pixels) return { width: alignDimension(pixels.width, true, 32), height: alignDimension(pixels.height, true, 32) };
-              const ratio = parseAspectRatio(selectedRatio === "auto" ? "1:1" : selectedRatio) || { width: 1, height: 1 };
-              const budget = editResolution === "0" ? 1024 : Math.round(Number(editResolution) || 1024);
-              if (budget >= 4096) {
-                  const shortSide = alignDimension((4096 * Math.min(ratio.width, ratio.height)) / Math.max(ratio.width, ratio.height), true, 32);
-                  return ratio.width >= ratio.height ? { width: 4096, height: shortSide } : { width: shortSide, height: 4096 };
-              }
-              const aspect = ratio.width / ratio.height;
-              return { width: alignDimension(Math.sqrt(budget * budget * aspect), true, 32), height: alignDimension(Math.sqrt(budget * budget / aspect), true, 32) };
+              if (pixels) return { width: alignQwen32(pixels.width), height: alignQwen32(pixels.height) };
+              // 编辑 + 自动比例：输出跟随第 1 张参考图，优先展示按首图比例的预估。
+              if (hasImageReferences && selectedRatio === "auto" && editOutputSize) return { width: editOutputSize.width, height: editOutputSize.height };
+              return { width: qwenPlan?.width || 1024, height: qwenPlan?.height || 1024 };
           })()
         : dimensions;
     // Qwen 统一分辨率档：1K/1.5K/2K 是面积预算，4K 是长边 4096 的超分档，「跟随原图」只在图像编辑时生效。
@@ -178,7 +176,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                             </div>
                             <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
                                 {hasImageReferences
-                                    ? "1K/1.5K/2K 是像素预算，输出跟随第 1 张参考图的比例；「跟随原图」保持第 1 张参考图的原始尺寸；「4K」先原生 2K 采样再经 SeedVR2 超分到长边 4096，耗时更高。"
+                                    ? "1K/1.5K/2K 是像素预算：宽高比为「自动」时输出跟随第 1 张参考图的比例，选择比例或修改宽高后按所选画布重新构图（参考图仅作内容依据，不会被拉伸）；「跟随原图」保持第 1 张参考图原始尺寸；「4K」先原生 2K 采样再经 SeedVR2 超分到长边 4096，耗时更高。"
                                     : "1K/1.5K/2K 是像素预算（1K≈1024²、2K≈2048²），配合宽高比得到下方「输出尺寸」；「4K」先原生 2K 采样再经 SeedVR2 超分到长边 4096，耗时更高。连接参考图后可切换为跟随原图。"}
                             </p>
                         </>
@@ -192,15 +190,15 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </div>
                     )}
                 </div>
-                {qwen && hasImageReferences ? (
+                {qwen && followOriginal ? (
                     <div className="space-y-2.5">
-                        <SettingTitle color={theme.node.muted}>输出尺寸</SettingTitle>
+                        <SettingTitle color={theme.node.muted}>输出尺寸（已锁定）</SettingTitle>
                         <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
                             {(() => {
-                                const sizeText = editOutputSize ? (followOriginal ? `：约 ${editOutputSize.width}×${editOutputSize.height}（32 对齐）` : `，输出约 ${editOutputSize.width}×${editOutputSize.height}`) : imageReferences?.firstUrl ? "（正在读取参考图尺寸…）" : "";
-                                return followOriginal ? `保持第 1 张参考图的原始尺寸${sizeText}。` : `按分辨率预算缩放第 1 张参考图${sizeText}。`;
+                                const sizeText = editOutputSize ? `约 ${editOutputSize.width}×${editOutputSize.height}（32 对齐）` : imageReferences?.firstUrl ? "正在读取参考图尺寸…" : "";
+                                return `保持第 1 张参考图的原始尺寸${sizeText ? `：${sizeText}` : ""}；宽高比与宽高不可修改。`;
                             })()}
-                            {(imageReferences?.count || 0) > 1 ? `其余 ${(imageReferences?.count || 0) - 1} 张参考图只作为内容参考，不影响输出尺寸；提示词里可用 <image1>、<image2> 引用。` : "提示词里可用 <image1> 引用。"}
+                            {(imageReferences?.count || 0) > 1 ? `其余 ${(imageReferences?.count || 0) - 1} 张参考图只作为内容参考；提示词里可用 <image1>、<image2> 引用。` : "提示词里可用 <image1> 引用。"}
                         </p>
                     </div>
                 ) : (
@@ -223,7 +221,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </div>
                     </div>
                 )}
-                {qwen && !hasImageReferences ? (
+                {qwen && !followOriginal ? (
                     <div className="space-y-2.5">
                         <div className="flex items-center justify-between gap-3">
                             <SettingTitle color={theme.node.muted}>输出尺寸</SettingTitle>
@@ -237,11 +235,15 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                             </div>
                         </div>
                         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
-                            <DimensionInput prefix="W" value={activeDimensions.width} disabled={selectedRatio === "auto"} theme={theme} alignToStep={snapDimensionToStep} step={32} onChange={(value) => updateDimension("width", value)} />
+                            <DimensionInput prefix="W" value={activeDimensions.width} disabled={false} theme={theme} alignToStep={snapDimensionToStep} step={32} onChange={(value) => updateDimension("width", value)} />
                             <span className="text-lg opacity-45">↔</span>
-                            <DimensionInput prefix="H" value={activeDimensions.height} disabled={selectedRatio === "auto"} theme={theme} alignToStep={snapDimensionToStep} step={32} onChange={(value) => updateDimension("height", value)} />
+                            <DimensionInput prefix="H" value={activeDimensions.height} disabled={false} theme={theme} alignToStep={snapDimensionToStep} step={32} onChange={(value) => updateDimension("height", value)} />
                         </div>
-                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>文生图的最终输出尺寸（随上方分辨率和比例自动计算，可直接改）；连接参考图后输出跟随第 1 张参考图，此处自动锁定。</p>
+                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                            {hasImageReferences
+                                ? `宽高比为「自动」时输出跟随第 1 张参考图${selectedRatio === "auto" ? "（下方数值为预估）" : ""}；选择比例或直接修改宽高后，按所选画布重新构图，参考图仅作内容依据。${(imageReferences?.count || 0) > 1 ? `其余 ${(imageReferences?.count || 0) - 1} 张参考图不改变输出尺寸。` : ""}`
+                                : "文生图的最终输出尺寸（随上方分辨率和比例自动计算，可直接改）。"}
+                        </p>
                     </div>
                 ) : null}
                 {!qwen ? (

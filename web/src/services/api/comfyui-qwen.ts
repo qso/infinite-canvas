@@ -37,7 +37,8 @@ export async function createQwenImageTasks(config: AiConfig, prompt: string, ref
         negativePrompt: (config.imageNegative || "").trim(),
         width: 0,
         height: 0,
-        resolution: resolveEditResolution(config),
+        customLatent: false,
+        resolution: 0,
         steps: Math.max(1, Math.round(Number(config.imageSteps) || QWEN_IMAGE_21_DEFAULT_STEPS)),
         cfg: Math.max(1, Number(config.imageCfg) || 1),
         seed,
@@ -50,11 +51,12 @@ export async function createQwenImageTasks(config: AiConfig, prompt: string, ref
     if (references.length) {
         const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
         const images = await Promise.all(files.map((file) => uploadReference(file, clientId, signal)));
-        const upscale = resolveResolutionTier(config).is4k ? QWEN_IMAGE_4K_LONG_EDGE : 0;
-        for (let index = 0; index < count; index += 1) graphs.push({ ...common, seed: seed + index, images, upscaleLongEdge: upscale });
+        // 编辑：仅「跟随原图/自动比例」沿用首图 latent；选定比例或宽高后按用户画布采样。
+        const plan = resolveQwenCanvasPlan(config, true);
+        for (let index = 0; index < count; index += 1) graphs.push({ ...common, seed: seed + index, images, resolution: plan.budget, customLatent: plan.customLatent, width: plan.nativeWidth, height: plan.nativeHeight, upscaleLongEdge: plan.upscaleLongEdge });
     } else {
-        const plan = resolveTextToImagePlan(config);
-        graphs.push({ ...common, width: plan.width, height: plan.height, upscaleLongEdge: plan.upscaleLongEdge });
+        const plan = resolveQwenCanvasPlan(config, false);
+        graphs.push({ ...common, resolution: plan.budget, customLatent: true, width: plan.nativeWidth, height: plan.nativeHeight, upscaleLongEdge: plan.upscaleLongEdge });
     }
     return Promise.all(graphs.map((graph) => submitQwenPrompt(graph, signal)));
 }
@@ -126,33 +128,55 @@ function blobToDataUrl(blob: Blob) {
     });
 }
 
-/** 文生图输出计划：显式 WxH 优先（4K 级折半采样 + 超分）；否则按统一分辨率档 × 比例计算。 */
-export function resolveTextToImagePlan(config: AiConfig): { width: number; height: number; upscaleLongEdge: number } {
-    const pixels = parsePixelSize(config.size || "");
-    if (pixels) {
-        const width = align32(pixels.width);
-        const height = align32(pixels.height);
-        return Math.max(width, height) >= 3072
-            ? { width: align32(width / 2), height: align32(height / 2), upscaleLongEdge: Math.max(width, height) }
-            : { width, height, upscaleLongEdge: 0 };
-    }
-    const ratio = parseAspectRatio(config.size || "") || { width: 1, height: 1 };
+/** 画布计划：面板预览与提交链路共用同一份数学，保证所见即所采样。 */
+export type QwenCanvasPlan = {
+    /** 编辑模式保持第 1 张参考图原始尺寸（预算 0）。 */
+    followOriginal: boolean;
+    /** 是否在用户指定的空画布上采样（文生图恒为 true；编辑需用户选定比例或宽高）。 */
+    customLatent: boolean;
+    /** 参考图像素预算（跟随原图为 0）。 */
+    budget: number;
+    /** 最终输出宽高（4K 档为超分后；跟随/自动为 0，由运行时跟随首图决定）。 */
+    width: number;
+    height: number;
+    /** 原生采样宽高（4K 档折半）。 */
+    nativeWidth: number;
+    nativeHeight: number;
+    upscaleLongEdge: number;
+};
+
+/**
+ * 解析输出画布：显式 WxH 优先（长边 ≥3072 触发折半采样 + SeedVR2 超分）；
+ * 否则按 分辨率档 × 比例 计算（4K 档 = 长边 4096）。编辑模式下宽高比为「自动」
+ * 或选择「跟随原图」时不使用自定义画布，输出跟随第 1 张参考图。
+ */
+export function resolveQwenCanvasPlan(config: AiConfig, editing: boolean): QwenCanvasPlan {
     const tier = resolveResolutionTier(config);
-    if (tier.is4k) {
-        // 4K 档 = 长边 4096：原生按长边 2048 采样，SeedVR2 超分回来。
-        const landscape = ratio.width >= ratio.height;
-        const shortSide = align32((QWEN_IMAGE_4K_LONG_EDGE / 2 * Math.min(ratio.width, ratio.height)) / Math.max(ratio.width, ratio.height));
-        return { width: landscape ? 2048 : shortSide, height: landscape ? shortSide : 2048, upscaleLongEdge: QWEN_IMAGE_4K_LONG_EDGE };
+    const followOriginal = editing && tier.budget === 0;
+    const size = (config.size || "auto").trim();
+    const pixels = parsePixelSize(size);
+    const explicitRatio = parseAspectRatio(size);
+    const customLatent = !editing || (!followOriginal && Boolean(pixels || explicitRatio));
+    const base = { budget: tier.budget, followOriginal, customLatent, width: 0, height: 0, nativeWidth: 0, nativeHeight: 0, upscaleLongEdge: tier.is4k ? QWEN_IMAGE_4K_LONG_EDGE : 0 };
+    if (!customLatent) return base;
+    const ratio = pixels || explicitRatio || { width: 1, height: 1 };
+    if (pixels) {
+        const width = alignQwen32(pixels.width);
+        const height = alignQwen32(pixels.height);
+        if (Math.max(width, height) < 3072) return { ...base, width, height, nativeWidth: width, nativeHeight: height, upscaleLongEdge: 0 };
+        return { ...base, width, height, nativeWidth: alignQwen32(width / 2), nativeHeight: alignQwen32(height / 2), upscaleLongEdge: Math.max(width, height) };
     }
-    // 1K/1.5K/2K 档 = 面积预算，与模型自己的参考图缩放数学一致；「跟随原图」只对编辑有意义，文生图回退 1K。
+    if (tier.is4k) {
+        const shortSide = alignQwen32((QWEN_IMAGE_4K_LONG_EDGE * Math.min(ratio.width, ratio.height)) / Math.max(ratio.width, ratio.height));
+        const width = ratio.width >= ratio.height ? QWEN_IMAGE_4K_LONG_EDGE : shortSide;
+        const height = ratio.width >= ratio.height ? shortSide : QWEN_IMAGE_4K_LONG_EDGE;
+        return { ...base, width, height, nativeWidth: alignQwen32(width / 2), nativeHeight: alignQwen32(height / 2) };
+    }
     const budget = tier.budget || 1024;
     const aspect = ratio.width / ratio.height;
-    return { width: align32(Math.sqrt(budget * budget * aspect)), height: align32(Math.sqrt(budget * budget / aspect)), upscaleLongEdge: 0 };
-}
-
-/** 图像编辑分辨率预算：0 表示保持参考图原始尺寸。 */
-export function resolveEditResolution(config: AiConfig) {
-    return resolveResolutionTier(config).budget;
+    const width = alignQwen32(Math.sqrt(budget * budget * aspect));
+    const height = alignQwen32(Math.sqrt(budget * budget / aspect));
+    return { ...base, width, height, nativeWidth: width, nativeHeight: height, upscaleLongEdge: 0 };
 }
 
 /** 4K 超分档的目标长边。 */
@@ -177,6 +201,11 @@ function resolveSeed(config: AiConfig) {
 
 function align32(value: number) {
     return Math.min(4096, Math.max(256, Math.ceil(value / 32) * 32));
+}
+
+/** Qwen 采样画布的 32 对齐（面板预览与提交共用）。 */
+export function alignQwen32(value: number) {
+    return align32(value);
 }
 
 function delay(ms: number, signal?: AbortSignal) {
