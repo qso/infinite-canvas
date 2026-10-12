@@ -1,0 +1,77 @@
+web/src/components/canvas/canvas-config-node-panel.tsx
+  e5cfb1f30ccea66b 106
+web/src/pages/image/index.tsx
+  e5cfb1f30ccea66b 482,545,557,568
+web/src/components/canvas/canvas-image-settings-popover.tsx
+  e5cfb1f30ccea66b 7,22,25,36,39-40,76,130
+web/src/components/canvas/canvas-node-prompt-panel.tsx
+  e5cfb1f30ccea66b 66-70,115
+docs/content/docs/progress/pending-test.mdx
+  e5cfb1f30ccea66b 10
+web/src/components/image-settings-panel.tsx
+  e5cfb1f30ccea66b 1,9,34,43-44,47,52-68,77-88,172,179-183,195-204,206-226,244
+web/src/services/api/comfyui-qwen.ts
+  e5cfb1f30ccea66b 147-148,150
+CHANGELOG.md
+  e5cfb1f30ccea66b 5-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "82286f16f5e7f24feb6743597b895027ef0c96f2",
+  "prompts": {
+    "e5cfb1f30ccea66b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "260e4db0-d0fa-4bed-a583-60f9fc15b254",
+        "model": "<synthetic>"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 103,
+      "total_deletions": 40,
+      "accepted_lines": 98,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "web/src/components/canvas/canvas-node-prompt-panel.tsx": {
+          "additions": 6,
+          "accepted_lines": 6
+        },
+        "web/src/services/api/comfyui-qwen.ts": {
+          "additions": 3,
+          "deletions": 2,
+          "accepted_lines": 3
+        },
+        "web/src/components/canvas/canvas-config-node-panel.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "CHANGELOG.md": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "web/src/components/image-settings-panel.tsx": {
+          "additions": 78,
+          "deletions": 28,
+          "accepted_lines": 73
+        },
+        "web/src/pages/image/index.tsx": {
+          "additions": 4,
+          "deletions": 4,
+          "accepted_lines": 4
+        },
+        "web/src/components/canvas/canvas-image-settings-popover.tsx": {
+          "additions": 8,
+          "deletions": 4,
+          "accepted_lines": 8
+        }
+      }
+    }
+  }
+}
