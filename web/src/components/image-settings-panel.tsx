@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { isQwenImage21, QWEN_IMAGE_21_DEFAULT_STEPS, QWEN_IMAGE_21_MAX_STEPS } from "@/constant/comfyui";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaRatioOptions, mediaScaleOptions, parseAspectRatio, readMediaDimensions } from "@/lib/media-size";
+import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaRatioOptions, mediaScaleOptions, parseAspectRatio, parsePixelSize, readMediaDimensions } from "@/lib/media-size";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
@@ -22,7 +22,7 @@ const qwenResolutionOptions = [
     { value: "1536", label: "1.5K" },
     { value: "2048", label: "2K" },
     { value: "4096", label: "4K" },
-    { value: "0", label: "原图" },
+    { value: "0", label: "跟随原图" },
 ];
 
 export const imageQualityOptions = qualityOptions.map((item) => ({ value: item.value, get label() { return i18n.t(`settingsPanels.common.${item.labelKey}`); } }));
@@ -55,25 +55,30 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const editResolution = config.imageResolution || "1024";
     const applySize = (scale: string, ratio: string) => onConfigChange("size", computeMediaSize(scale, ratio));
     const selectScale = (scale: string) => applySize(scale, selectedRatio === "auto" ? "1:1" : selectedRatio);
-    // Qwen 的 4K 档按「长边 4096 × 所选比例」记录最终尺寸，实际原生采样取一半，再由 SeedVR2 超分回来。
-    const selectQwenScale = (scale: string) => {
-        if (scale !== "4k") {
-            selectScale(scale);
-            return;
-        }
-        const parsed = parseAspectRatio(selectedRatio === "auto" ? "1:1" : selectedRatio);
-        if (!parsed) {
-            onConfigChange("size", "4096x4096");
-            return;
-        }
-        const shortSide = Math.ceil((4096 * Math.min(parsed.width, parsed.height)) / Math.max(parsed.width, parsed.height) / 32) * 32;
-        onConfigChange("size", parsed.width >= parsed.height ? `4096x${shortSide}` : `${shortSide}x4096`);
+    const selectRatio = (ratio: string) => (qwen ? onConfigChange("size", ratio) : applySize(selectedScale, ratio));
+    const activeDimensions = qwen
+        ? (() => {
+              const pixels = parsePixelSize(activeSize);
+              if (pixels) return { width: alignDimension(pixels.width, true, 32), height: alignDimension(pixels.height, true, 32) };
+              const ratio = parseAspectRatio(selectedRatio === "auto" ? "1:1" : selectedRatio) || { width: 1, height: 1 };
+              const budget = editResolution === "0" ? 1024 : Math.round(Number(editResolution) || 1024);
+              if (budget >= 4096) {
+                  const shortSide = alignDimension((4096 * Math.min(ratio.width, ratio.height)) / Math.max(ratio.width, ratio.height), true, 32);
+                  return ratio.width >= ratio.height ? { width: 4096, height: shortSide } : { width: shortSide, height: 4096 };
+              }
+              const aspect = ratio.width / ratio.height;
+              return { width: alignDimension(Math.sqrt(budget * budget * aspect), true, 32), height: alignDimension(Math.sqrt(budget * budget / aspect), true, 32) };
+          })()
+        : dimensions;
+    // Qwen 统一分辨率档：1K/1.5K/2K 是面积预算，4K 是长边 4096 的超分档，「跟随原图」只在图像编辑时生效。
+    const selectQwenResolution = (value: string) => {
+        if (parsePixelSize(activeSize)) onConfigChange("size", selectedRatio === "auto" ? "1:1" : selectedRatio);
+        onConfigChange("imageResolution", value);
     };
-    const selectRatio = (ratio: string) => applySize(selectedScale, ratio);
     const updateDimension = (key: "width" | "height", value: number | null) => {
-        const next = Math.max(1, Math.floor(value || dimensions[key] || 1024));
-        const width = key === "width" ? next : dimensions.width;
-        const height = key === "height" ? next : dimensions.height;
+        const next = Math.max(1, Math.floor(value || activeDimensions[key] || 1024));
+        const width = key === "width" ? next : activeDimensions.width;
+        const height = key === "height" ? next : activeDimensions.height;
         onConfigChange("size", `${alignDimension(width, snapDimensionToStep, dimensionStep)}x${alignDimension(height, snapDimensionToStep, dimensionStep)}`);
     };
 
@@ -106,34 +111,49 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </div>
                     </div>
                 ) : null}
-                <div className="space-y-2.5">
-                    <div className="flex items-center justify-between gap-3">
-                        <SettingTitle color={theme.node.muted}>{qwen ? "文生图尺寸" : t("settingsPanels.image.size")}</SettingTitle>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium" style={{ color: theme.node.muted }}>
-                                {qwen ? "32 倍数对齐" : t("settingsPanels.image.align16")}
-                            </span>
-                            <span title={qwen ? "输入完成后自动向上补成 32 的倍数（模型要求）" : t("settingsPanels.image.align16Hint")} onMouseDown={(event) => event.stopPropagation()}>
-                                <Switch size="small" checked={snapDimensionToStep} onChange={setSnapDimensionToStep} />
-                            </span>
+                {!qwen ? (
+                    <div className="space-y-2.5">
+                        <div className="flex items-center justify-between gap-3">
+                            <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.size")}</SettingTitle>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium" style={{ color: theme.node.muted }}>
+                                    {t("settingsPanels.image.align16")}
+                                </span>
+                                <span title={t("settingsPanels.image.align16Hint")} onMouseDown={(event) => event.stopPropagation()}>
+                                    <Switch size="small" checked={snapDimensionToStep} onChange={setSnapDimensionToStep} />
+                                </span>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
+                            <DimensionInput prefix="W" value={dimensions.width} disabled={selectedRatio === "auto"} theme={theme} alignToStep={snapDimensionToStep} step={dimensionStep} onChange={(value) => updateDimension("width", value)} />
+                            <span className="text-lg opacity-45">↔</span>
+                            <DimensionInput prefix="H" value={dimensions.height} disabled={selectedRatio === "auto"} theme={theme} alignToStep={snapDimensionToStep} step={dimensionStep} onChange={(value) => updateDimension("height", value)} />
                         </div>
                     </div>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
-                        <DimensionInput prefix="W" value={dimensions.width} disabled={selectedRatio === "auto"} theme={theme} alignToStep={snapDimensionToStep} step={dimensionStep} onChange={(value) => updateDimension("width", value)} />
-                        <span className="text-lg opacity-45">↔</span>
-                        <DimensionInput prefix="H" value={dimensions.height} disabled={selectedRatio === "auto"} theme={theme} alignToStep={snapDimensionToStep} step={dimensionStep} onChange={(value) => updateDimension("height", value)} />
-                    </div>
-                    {qwen ? <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>1K/2K 为原生采样；4K 先按一半尺寸原生采样，再经 SeedVR2 超分到所选尺寸（长边 4096），耗时与显存开销更高。</p> : null}
-                </div>
+                ) : null}
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.resolution")}</SettingTitle>
-                    <div className={`grid ${qwen ? "grid-cols-3" : "grid-cols-4"} gap-2.5`}>
-                        {(qwen ? [{ value: "1k", label: "1K" }, { value: "2k", label: "2K" }, { value: "4k", label: "4K" }] : mediaScaleOptions.map((value) => ({ value, label: value === "auto" ? t("settingsPanels.common.auto") : value }))).map((item) => (
-                            <OptionPill key={item.value} selected={selectedScale === item.value} theme={theme} onClick={() => (qwen ? selectQwenScale(item.value) : selectScale(item.value))}>
-                                {item.label}
-                            </OptionPill>
-                        ))}
-                    </div>
+                    {qwen ? (
+                        <>
+                            <div className="grid grid-cols-3 gap-2.5">
+                                {qwenResolutionOptions.map((item) => (
+                                    <OptionPill key={item.value} selected={editResolution === item.value} theme={theme} onClick={() => selectQwenResolution(item.value)}>
+                                        {item.label}
+                                    </OptionPill>
+                                ))}
+                                <ResolutionInput value={qwenResolutionOptions.some((item) => item.value === editResolution) ? "" : editResolution} theme={theme} onChange={(value) => selectQwenResolution(value.trim() || "1024")} />
+                            </div>
+                            <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>决定即将生成图片的分辨率。1K/1.5K/2K 是像素预算（1K≈1024²、2K≈2048²），文生图配合宽高比得到下方「输出尺寸」，图像编辑则把参考图缩到该预算内并跟随其比例；「跟随原图」仅编辑时生效（保持参考图原始尺寸）；「4K」先原生 2K 采样再经 SeedVR2 超分到长边 4096，耗时更高。</p>
+                        </>
+                    ) : (
+                        <div className="grid grid-cols-4 gap-2.5">
+                            {mediaScaleOptions.map((value) => (
+                                <OptionPill key={value} selected={selectedScale === value} theme={theme} onClick={() => selectScale(value)}>
+                                    {value === "auto" ? t("settingsPanels.common.auto") : value}
+                                </OptionPill>
+                            ))}
+                        </div>
+                    )}
                 </div>
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.aspectRatio")}</SettingTitle>
@@ -155,16 +175,23 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 </div>
                 {qwen ? (
                     <div className="space-y-2.5">
-                        <SettingTitle color={theme.node.muted}>编辑分辨率</SettingTitle>
-                        <div className="grid grid-cols-3 gap-2.5">
-                            {qwenResolutionOptions.map((item) => (
-                                <OptionPill key={item.value} selected={editResolution === item.value} theme={theme} onClick={() => onConfigChange("imageResolution", item.value)}>
-                                    {item.label}
-                                </OptionPill>
-                            ))}
-                            <ResolutionInput value={editResolution === "0" ? "" : editResolution} theme={theme} onChange={(value) => onConfigChange("imageResolution", value)} />
+                        <div className="flex items-center justify-between gap-3">
+                            <SettingTitle color={theme.node.muted}>输出尺寸</SettingTitle>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium" style={{ color: theme.node.muted }}>
+                                    32 倍数对齐
+                                </span>
+                                <span title="输入完成后自动向上补成 32 的倍数（模型要求）" onMouseDown={(event) => event.stopPropagation()}>
+                                    <Switch size="small" checked={snapDimensionToStep} onChange={setSnapDimensionToStep} />
+                                </span>
+                            </div>
                         </div>
-                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>参考图按比例缩到该像素预算内（保持宽高比）；「原图」保持原始尺寸；「4K」按 2K 预算原生编辑后经 SeedVR2 超分到 4096 长边。输出尺寸跟随第一张参考图。</p>
+                        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
+                            <DimensionInput prefix="W" value={activeDimensions.width} disabled={selectedRatio === "auto"} theme={theme} alignToStep={snapDimensionToStep} step={32} onChange={(value) => updateDimension("width", value)} />
+                            <span className="text-lg opacity-45">↔</span>
+                            <DimensionInput prefix="H" value={activeDimensions.height} disabled={selectedRatio === "auto"} theme={theme} alignToStep={snapDimensionToStep} step={32} onChange={(value) => updateDimension("height", value)} />
+                        </div>
+                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>文生图的最终输出尺寸（随上方分辨率和比例自动计算，可直接改）；图像编辑时输出跟随第一张参考图，此处不生效。</p>
                     </div>
                 ) : null}
                 {!qwen ? (

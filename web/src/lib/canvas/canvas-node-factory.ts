@@ -47,6 +47,11 @@ export function buildImageGenerationMetadata(type: CanvasImageGenerationType, co
         size: config.size,
         quality: config.quality,
         ...(config.background ? { background: config.background } : {}),
+        imageSteps: config.imageSteps,
+        imageCfg: config.imageCfg,
+        imageSeed: config.imageSeed,
+        ...(config.imageNegative ? { imageNegative: config.imageNegative } : {}),
+        imageResolution: config.imageResolution,
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
     };

@@ -38,6 +38,8 @@ export type CanvasNodeImage = {
     naturalHeight: number;
     bytes: number;
     mimeType: string;
+    /** 云端 ComfyUI 图像任务编号；刷新后可凭它恢复查询。 */
+    taskId?: string;
 };
 
 export type CanvasNodeText = {
@@ -61,6 +63,11 @@ export type CanvasNodeMetadata = {
     size?: string;
     quality?: string;
     background?: string;
+    imageSteps?: string;
+    imageCfg?: string;
+    imageSeed?: string;
+    imageNegative?: string;
+    imageResolution?: string;
     count?: number;
     textCount?: number;
     texts?: CanvasNodeText[];

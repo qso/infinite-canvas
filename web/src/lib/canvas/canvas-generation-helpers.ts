@@ -111,6 +111,11 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
         size: node?.metadata?.size || config.size || defaultConfig.size,
         background: node?.metadata?.background ?? config.background ?? defaultConfig.background,
+        imageSteps: node?.metadata?.imageSteps ?? config.imageSteps ?? defaultConfig.imageSteps,
+        imageCfg: node?.metadata?.imageCfg ?? config.imageCfg ?? defaultConfig.imageCfg,
+        imageSeed: node?.metadata?.imageSeed ?? config.imageSeed ?? defaultConfig.imageSeed,
+        imageNegative: node?.metadata?.imageNegative ?? config.imageNegative ?? defaultConfig.imageNegative,
+        imageResolution: node?.metadata?.imageResolution ?? config.imageResolution ?? defaultConfig.imageResolution,
         videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
         vquality: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,
         videoGenerateAudio: node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
@@ -172,10 +177,15 @@ export function hasResumableVideoTask(node: CanvasNodeData) {
     return node.type === CanvasNodeType.Video && Boolean(node.metadata?.videoTaskId) && !node.metadata?.content;
 }
 
+/** 图片节点上还有挂了云端任务编号的生成中分片；刷新后可自动恢复查询。 */
+export function hasResumableImageTask(node: CanvasNodeData) {
+    return node.type === CanvasNodeType.Image && Boolean(node.metadata?.images?.some((image) => image.status === "loading" && image.taskId));
+}
+
 export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     return nodes.map((node) =>
         node.metadata?.status === "loading"
-            ? hasResumableVideoTask(node) || hasResumableMusicTask(node) || node.type === CanvasNodeType.Music && Boolean(node.metadata.musicAnalysisId) && (node.metadata.musicAnalysisStatus === "queued" || node.metadata.musicAnalysisStatus === "running")
+            ? hasResumableVideoTask(node) || hasResumableMusicTask(node) || hasResumableImageTask(node) || node.type === CanvasNodeType.Music && Boolean(node.metadata.musicAnalysisId) && (node.metadata.musicAnalysisStatus === "queued" || node.metadata.musicAnalysisStatus === "running")
                 ? node
                 : {
                       ...node,

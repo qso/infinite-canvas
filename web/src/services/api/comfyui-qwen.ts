@@ -3,7 +3,7 @@ import { nanoid } from "nanoid";
 
 import { COMFYUI_PROXY_PATH, QWEN_IMAGE_21_DEFAULT_STEPS } from "@/constant/comfyui";
 import { dataUrlToFile } from "@/lib/image-utils";
-import { computeMediaSize, inferMediaRatio, inferMediaScale, parsePixelSize } from "@/lib/media-size";
+import { parseAspectRatio, parsePixelSize } from "@/lib/media-size";
 import { imageToDataUrl } from "@/services/image-storage";
 import { buildQwenImageWorkflow, type QwenImageWorkflowInput } from "./comfyui-qwen-workflow";
 import type { ReferenceImage } from "@/types/image";
@@ -19,7 +19,17 @@ const api = axios.create({ baseURL: COMFYUI_PROXY_PATH });
 const POLL_INTERVAL_MS = 2500;
 const QWEN_IMAGE_TIMEOUT_MS = 10 * 60_000;
 
-export async function runQwenImageGeneration(config: AiConfig, prompt: string, references: ReferenceImage[], count: number, signal?: AbortSignal): Promise<Array<{ id: string; dataUrl: string }>> {
+export type QwenGeneratedImage = { id: string; dataUrl: string };
+
+/** 提交任务并等全部完成；onTaskIds 在云端受理后立刻回调，调用方可持久化以便刷新后恢复。 */
+export async function runQwenImageGeneration(config: AiConfig, prompt: string, references: ReferenceImage[], count: number, signal?: AbortSignal, onTaskIds?: (ids: string[]) => void): Promise<QwenGeneratedImage[]> {
+    const ids = await createQwenImageTasks(config, prompt, references, count, signal);
+    onTaskIds?.(ids);
+    return waitForQwenImageTasks(ids, signal);
+}
+
+/** 上传参考图并把生成图提交到云端队列，返回任务编号（顺序与请求张数一致）。 */
+export async function createQwenImageTasks(config: AiConfig, prompt: string, references: ReferenceImage[], count: number, signal?: AbortSignal): Promise<string[]> {
     const clientId = crypto.randomUUID();
     const seed = resolveSeed(config);
     const common = {
@@ -36,20 +46,21 @@ export async function runQwenImageGeneration(config: AiConfig, prompt: string, r
         upscaleLongEdge: 0,
         outputPrefix: `ai-creative-studio/${clientId}`,
     };
-    // 文生图按 batch 一次采样；图像编辑没有可复制的批量 latent，按张数提交多个任务。
     const graphs: QwenImageWorkflowInput[] = [];
     if (references.length) {
         const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
         const images = await Promise.all(files.map((file) => uploadReference(file, clientId, signal)));
-        const upscale = is4kEditResolution(config) ? QWEN_IMAGE_4K_LONG_EDGE : 0;
+        const upscale = resolveResolutionTier(config).is4k ? QWEN_IMAGE_4K_LONG_EDGE : 0;
         for (let index = 0; index < count; index += 1) graphs.push({ ...common, seed: seed + index, images, upscaleLongEdge: upscale });
     } else {
-        const size = resolveOutputSize(config.size);
-        // 4K 档：原生按目标一半采样（约 2K），再由 SeedVR2 超分到目标长边。
-        const native = is4kSize(config.size) ? { width: align32(size.width / 2), height: align32(size.height / 2) } : size;
-        graphs.push({ ...common, width: native.width, height: native.height, upscaleLongEdge: is4kSize(config.size) ? Math.max(size.width, size.height) : 0 });
+        const plan = resolveTextToImagePlan(config);
+        graphs.push({ ...common, width: plan.width, height: plan.height, upscaleLongEdge: plan.upscaleLongEdge });
     }
-    const ids = await Promise.all(graphs.map((graph) => submitQwenPrompt(graph, signal)));
+    return Promise.all(graphs.map((graph) => submitQwenPrompt(graph, signal)));
+}
+
+/** 轮询云端任务直到全部完成并下载为 dataURL；任务失败抛错，超时抛错但任务仍在云端继续。 */
+export async function waitForQwenImageTasks(ids: string[], signal?: AbortSignal): Promise<QwenGeneratedImage[]> {
     return collectQwenImages(ids, signal);
 }
 
@@ -115,35 +126,45 @@ function blobToDataUrl(blob: Blob) {
     });
 }
 
-/** 文生图输出尺寸：优先显式 WxH，其次按比例+分辨率档位取预设，最后对齐到 32。 */
-export function resolveOutputSize(size: string) {
-    const pixels = parsePixelSize(size || "");
-    const scale = inferMediaScale(size || "1:1");
-    const computed = parsePixelSize(computeMediaSize(scale === "auto" ? "1k" : scale, inferMediaRatio(size || "1:1")));
-    const source = pixels || computed || { width: 1024, height: 1024 };
-    return { width: align32(source.width), height: align32(source.height) };
+/** 文生图输出计划：显式 WxH 优先（4K 级折半采样 + 超分）；否则按统一分辨率档 × 比例计算。 */
+export function resolveTextToImagePlan(config: AiConfig): { width: number; height: number; upscaleLongEdge: number } {
+    const pixels = parsePixelSize(config.size || "");
+    if (pixels) {
+        const width = align32(pixels.width);
+        const height = align32(pixels.height);
+        return Math.max(width, height) >= 3072
+            ? { width: align32(width / 2), height: align32(height / 2), upscaleLongEdge: Math.max(width, height) }
+            : { width, height, upscaleLongEdge: 0 };
+    }
+    const ratio = parseAspectRatio(config.size || "") || { width: 1, height: 1 };
+    const tier = resolveResolutionTier(config);
+    if (tier.is4k) {
+        // 4K 档 = 长边 4096：原生按长边 2048 采样，SeedVR2 超分回来。
+        const landscape = ratio.width >= ratio.height;
+        const shortSide = align32((QWEN_IMAGE_4K_LONG_EDGE / 2 * Math.min(ratio.width, ratio.height)) / Math.max(ratio.width, ratio.height));
+        return { width: landscape ? 2048 : shortSide, height: landscape ? shortSide : 2048, upscaleLongEdge: QWEN_IMAGE_4K_LONG_EDGE };
+    }
+    // 1K/1.5K/2K 档 = 面积预算，与模型自己的参考图缩放数学一致。
+    const aspect = ratio.width / ratio.height;
+    return { width: align32(Math.sqrt(tier.budget * tier.budget * aspect)), height: align32(Math.sqrt(tier.budget * tier.budget / aspect)), upscaleLongEdge: 0 };
 }
 
-/** 图像编辑分辨率预算：0 表示保持参考图原始尺寸；4K(4096) 是超分档，原生按 2K 预算采样。 */
+/** 图像编辑分辨率预算：0 表示保持参考图原始尺寸。 */
 export function resolveEditResolution(config: AiConfig) {
-    const value = (config.imageResolution || "").trim();
-    if (!value || value === "auto") return 1024;
-    if (value === "0" || value === "original") return 0;
-    if (value === "4096") return 2048;
-    return align32(Math.round(Number(value) || 1024));
-}
-
-export function is4kEditResolution(config: AiConfig) {
-    return (config.imageResolution || "").trim() === "4096";
-}
-
-/** 文生图 4K 判定：按所选/输入尺寸的长边是否达到 4K 档。 */
-export function is4kSize(size: string) {
-    return inferMediaScale(size) === "4k";
+    return resolveResolutionTier(config).budget;
 }
 
 /** 4K 超分档的目标长边。 */
 export const QWEN_IMAGE_4K_LONG_EDGE = 4096;
+
+/** 统一分辨率档：「跟随原图」(0) 在文生图下按 1K；自定义值钳制在 256–2048，≥4096 视为 4K 超分档。 */
+function resolveResolutionTier(config: AiConfig): { budget: number; is4k: boolean } {
+    const value = (config.imageResolution || "").trim();
+    if (value === "0" || value === "original") return { budget: 0, is4k: false };
+    const budget = align32(Math.round(Number(value) || 1024));
+    if (budget >= QWEN_IMAGE_4K_LONG_EDGE) return { budget: 2048, is4k: true };
+    return { budget: Math.min(2048, Math.max(256, budget)), is4k: false };
+}
 
 function resolveSeed(config: AiConfig) {
     const value = config.imageSeed?.trim();

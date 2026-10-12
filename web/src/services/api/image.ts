@@ -97,7 +97,7 @@ type GeminiPayload = {
     promptFeedback?: { blockReason?: string };
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = { signal?: AbortSignal; onImageTaskIds?: (ids: string[]) => void };
 
 const IMAGE_QUALITY_VALUES = ["low", "medium", "high", "xhigh", "max"];
 const DEFAULT_IMAGE_SHORT_SIDE = 1024;
@@ -698,7 +698,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     if (isQwenImage21(config.model || config.imageModel)) {
         try {
-            return await runQwenImageGeneration(config, prompt, [], n, options?.signal);
+            return await runQwenImageGeneration(config, prompt, [], n, options?.signal, options?.onImageTaskIds);
         } catch (error) {
             throw new Error(readAxiosError(error, qwenComfyError(error)));
         }
@@ -765,7 +765,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     if (isQwenImage21(config.model || config.imageModel)) {
         try {
-            return await runQwenImageGeneration(config, prompt, references, n, options?.signal);
+            return await runQwenImageGeneration(config, prompt, references, n, options?.signal, options?.onImageTaskIds);
         } catch (error) {
             throw new Error(readAxiosError(error, qwenComfyError(error)));
         }

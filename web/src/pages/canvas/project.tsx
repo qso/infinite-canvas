@@ -7,6 +7,7 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { waitForQwenImageTasks } from "@/services/api/comfyui-qwen";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createMusicAnalysis, createMusicGenerationTask, getMusicGenerationContent, getMusicGenerationScore, MusicApiError, uploadMusicReference, waitForMusicAnalysis, waitForMusicGenerationTask } from "@/services/api/music";
 import { MUSIC_ENDPOINT, MUSIC_MODEL, type MusicAnalysisRequest } from "@/constant/music";
@@ -65,6 +66,7 @@ import {
     getGenerationCount,
     getInputSummary,
     hasResumableVideoTask,
+    hasResumableImageTask,
     hasResumableMusicTask,
     hydrateAssistantImages,
     hydrateCanvasImages,
@@ -297,6 +299,7 @@ function InfiniteCanvasPage() {
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
     const videoPollIdsRef = useRef(new Set<string>());
+    const imagePollIdsRef = useRef(new Set<string>());
 
     const createHistoryEntry = useCallback(
         (): CanvasHistoryEntry => ({
@@ -724,6 +727,87 @@ function InfiniteCanvasPage() {
         [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
     );
 
+    const attachImageSlotTask = useCallback((rootId: string, imageId: string, ids: string[]) => {
+        const taskId = ids[0];
+        if (!taskId || !imageId) return;
+        setNodes((prev) => prev.map((node) => (node.id === rootId ? { ...node, metadata: { ...node.metadata, images: node.metadata?.images?.map((image) => (image.id === imageId ? { ...image, taskId } : image)) } } : node)));
+    }, []);
+
+    const applyGeneratedImageSlot = useCallback((rootId: string, imageId: string, uploaded: Awaited<ReturnType<typeof uploadImage>>, baseWidth: number, baseHeight: number) => {
+        const imageSize = fitNodeSize(uploaded.width, uploaded.height, baseWidth, baseHeight);
+        const item: CanvasNodeImage = { id: imageId, status: NODE_STATUS_SUCCESS, content: uploaded.url, storageKey: uploaded.storageKey, naturalWidth: uploaded.width, naturalHeight: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType };
+        setNodes((prev) =>
+            prev.map((node) => {
+                if (node.id !== rootId) return node;
+                const images = node.metadata?.images?.map((image) => (image.id === imageId ? item : image)) || [];
+                if (node.metadata?.primaryImageId) return { ...node, metadata: { ...node.metadata, images } };
+                const center = { x: node.position.x + node.width / 2, y: node.position.y + node.height / 2 };
+                return {
+                    ...node,
+                    position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
+                    ...imageSize,
+                    metadata: {
+                        ...node.metadata,
+                        content: item.content,
+                        storageKey: item.storageKey,
+                        naturalWidth: item.naturalWidth,
+                        naturalHeight: item.naturalHeight,
+                        bytes: item.bytes,
+                        mimeType: item.mimeType,
+                        images,
+                        primaryImageId: imageId,
+                    },
+                };
+            }),
+        );
+    }, []);
+
+    // 刷新后凭节点里保存的云端任务编号恢复图片生成，而不是把生成中的节点标记为中断。
+    const pollImageNodeTask = useCallback(
+        async (node: CanvasNodeData) => {
+            if (generationRequestsRef.current.has(node.id) || imagePollIdsRef.current.has(node.id)) return;
+            const slots = (node.metadata?.images || []).filter((image) => image.status === NODE_STATUS_LOADING && image.taskId);
+            if (!slots.length) return;
+            imagePollIdsRef.current.add(node.id);
+            let controller: AbortController | undefined;
+            try {
+                setRunningNodeId(node.id);
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
+                controller = startGenerationRequest(node.id, node.id, node.id);
+                const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+                await Promise.all(
+                    slots.map(async (slot) => {
+                        try {
+                            const [image] = await waitForQwenImageTasks([slot.taskId!], controller!.signal);
+                            const uploaded = await uploadImage(image.dataUrl, { signal: controller!.signal });
+                            applyGeneratedImageSlot(node.id, slot.id, uploaded, imageConfig.width, imageConfig.height);
+                        } catch (error) {
+                            if (isGenerationCanceled(error)) return;
+                            const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, images: item.metadata?.images?.map((image) => (image.id === slot.id ? { ...image, status: NODE_STATUS_ERROR, errorDetails } : image)) } } : item)));
+                        }
+                    }),
+                );
+                setNodes((prev) =>
+                    prev.map((item) => {
+                        if (item.id !== node.id) return item;
+                        const images = item.metadata?.images || [];
+                        if (images.some((image) => image.status === NODE_STATUS_LOADING)) return item;
+                        const hasSuccess = images.some((image) => image.status === NODE_STATUS_SUCCESS);
+                        return { ...item, metadata: { ...item.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : item.metadata?.errorDetails } };
+                    }),
+                );
+            } finally {
+                imagePollIdsRef.current.delete(node.id);
+                if (controller) {
+                    finishGenerationRequest(node.id, controller);
+                    setRunningNodeId((current) => (current === node.id ? null : current));
+                }
+            }
+        },
+        [applyGeneratedImageSlot, finishGenerationRequest, startGenerationRequest, t],
+    );
+
     const stopGenerationByRunningId = useCallback((runningId: string) => {
         const affectedNodeIds = new Set<string>();
         generationRequestsRef.current.forEach((request) => {
@@ -810,6 +894,7 @@ function InfiniteCanvasPage() {
     useEffect(() => {
         if (!projectLoaded) return;
         nodesRef.current.filter(hasResumableVideoTask).forEach((node) => void pollVideoNodeTask(node, true));
+        nodesRef.current.filter(hasResumableImageTask).forEach((node) => void pollImageNodeTask(node));
         queueMicrotask(() => {
             if (activeProjectIdRef.current === projectId) {
                 nodesRef.current.filter(hasResumableMusicTask).forEach((node) => void runMusicNodeTask(node.id));
@@ -2840,36 +2925,12 @@ function InfiniteCanvasPage() {
                     await Promise.all(
                         imageIds.map(async (imageId) => {
                             try {
+                                const taskOptions = { signal: controller.signal, onImageTaskIds: (ids: string[]) => attachImageSlotTask(rootId, imageId, ids) };
                                 const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, { signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { signal: controller.signal }).then((items) => items[0]);
+                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, taskOptions).then((items) => items[0])
+                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, taskOptions).then((items) => items[0]);
                                 const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
-                                const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                                const item: CanvasNodeImage = { id: imageId, status: NODE_STATUS_SUCCESS, content: uploaded.url, storageKey: uploaded.storageKey, naturalWidth: uploaded.width, naturalHeight: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType };
-                                setNodes((prev) =>
-                                    prev.map((node) => {
-                                        if (node.id !== rootId) return node;
-                                        const images = node.metadata?.images?.map((image) => (image.id === imageId ? item : image)) || [];
-                                        if (node.metadata?.primaryImageId) return { ...node, metadata: { ...node.metadata, images } };
-                                        const center = { x: node.position.x + node.width / 2, y: node.position.y + node.height / 2 };
-                                        return {
-                                            ...node,
-                                            position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
-                                            ...imageSize,
-                                            metadata: {
-                                                ...node.metadata,
-                                                content: item.content,
-                                                storageKey: item.storageKey,
-                                                naturalWidth: item.naturalWidth,
-                                                naturalHeight: item.naturalHeight,
-                                                bytes: item.bytes,
-                                                mimeType: item.mimeType,
-                                                images,
-                                                primaryImageId: imageId,
-                                            },
-                                        };
-                                    }),
-                                );
+                                applyGeneratedImageSlot(rootId, imageId, uploaded, imageConfig.width, imageConfig.height);
                                 hasSuccess = true;
                                 if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
                                 return true;
@@ -3134,7 +3195,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, handleGenerateMusic, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [applyGeneratedImageSlot, attachImageSlotTask, completeVideoNodeTask, effectiveConfig, finishGenerationRequest, handleGenerateMusic, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
@@ -3229,8 +3290,8 @@ function InfiniteCanvasPage() {
                 }
 
                 const image = useReferenceImages
-                    ? await requestEdit(generationConfig, prompt, retryImages, { signal: controller.signal }).then((items) => items[0])
-                    : await requestGeneration(generationConfig, prompt, { signal: controller.signal }).then((items) => items[0]);
+                    ? await requestEdit(generationConfig, prompt, retryImages, { signal: controller.signal, onImageTaskIds: (ids) => attachImageSlotTask(node.id, imageId || node.metadata?.primaryImageId || "", ids) }).then((items) => items[0])
+                    : await requestGeneration(generationConfig, prompt, { signal: controller.signal, onImageTaskIds: (ids) => attachImageSlotTask(node.id, imageId || node.metadata?.primaryImageId || "", ids) }).then((items) => items[0]);
                 const uploadedImage = await uploadImage(image.dataUrl, { signal: controller.signal });
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const retryImage: CanvasNodeImage = {
@@ -3300,7 +3361,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, handleGenerateMusic, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, runMusicNodeTask, startGenerationRequest, t],
+        [attachImageSlotTask, completeVideoNodeTask, effectiveConfig, finishGenerationRequest, handleGenerateMusic, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, runMusicNodeTask, startGenerationRequest, t],
     );
 
     const deleteBatchImage = useCallback((nodeId: string, imageId: string) => {
