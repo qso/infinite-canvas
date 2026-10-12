@@ -1,0 +1,35 @@
+web/src/components/canvas/canvas-node-prompt-panel.tsx
+  e5cfb1f30ccea66b 203-207
+web/src/components/canvas/canvas-config-node-panel.tsx
+  e5cfb1f30ccea66b 158-162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "dc55cc6bc7a56b0edec8177f929c361cab804553",
+  "prompts": {
+    "e5cfb1f30ccea66b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "260e4db0-d0fa-4bed-a583-60f9fc15b254",
+        "model": "<synthetic>"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 0,
+      "accepted_lines": 10,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "web/src/components/canvas/canvas-config-node-panel.tsx": {
+          "additions": 5,
+          "accepted_lines": 5
+        },
+        "web/src/components/canvas/canvas-node-prompt-panel.tsx": {
+          "additions": 5,
+          "accepted_lines": 5
+        }
+      }
+    }
+  }
+}
