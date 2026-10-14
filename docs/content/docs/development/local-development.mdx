@@ -58,3 +58,27 @@ Common locations:
 恢复资料已包含独立推理环境及其依赖的基础 Python、Node、CUDA，但当前快照不包含参考分析的独立环境、Python 3.11 和 ffmpeg。`bash recover.sh snapshot` 创建快照，已有快照时拒绝覆盖；`bash recover.sh restore` 先校验 SHA256，并在任何目标运行目录已存在时拒绝覆盖。尚未模拟整个容器重建，恢复后的实际服务启动仍需验收。
 
 已用完整默认模型生成一首原创短样例，得到 37.479 秒、48kHz 双声道 FLOAT32 WAV 和 ABC 乐谱；重复 UUID 保持一条任务记录，参数冲突返回 409。该结果只证明这次链路可用，不代表完整长歌、其他规划模式或高级参数效果已验收。权重使用 CC BY-NC 4.0，模型许可与本项目代码许可独立。
+
+## 云端 FireRedAudio 语音环境
+
+FireRedAudio（FireRed 团队统一音频大模型，9B 骨干 + Whisper-large-v3 编码器 + RedAE 流匹配解码器，约 10.6B，Apache-2.0）与 YuE2 同机部署在第二台 RTX 5090：FireRed 服务监听 `127.0.0.1:8191`，YuE2 仍在 8190。显存错峰策略：FireRed 每个任务由 `api.py` 起独立 `worker.py` 子进程加载模型、完成即退出释放显存；YuE2 已改为按任务加载并在任务结束或参考分析前卸载管线。两服务任务各自串行排队，同一时刻只有一个模型占用 GPU。
+
+| 云端路径 | 用途 |
+| --- | --- |
+| `/project/daixinliang/audio-studio/services/firered-audio` | 服务源码（api.py / worker.py / bootstrap.py / deploy.sh / start.sh） |
+| `/project/daixinliang/audio-studio/models/FireRedAudio` | 主模型权重（约 21.2GB，ModelScope 下载） |
+| `/project/daixinliang/audio-studio/models/RedAE_decoder/model.pt` | 生成类任务的 RedAE 解码器（约 8.4GB） |
+| `/project/daixinliang/audio-studio/jobs/firered.sqlite3` | 任务记录（服务中断后可按编号恢复） |
+| `/project/daixinliang/audio-studio/outputs/firered` | 每任务工作目录：输入转码、音频成品与 worker 日志 |
+| `/var/tmp/audio-studio/firered-env` | uv 管理的 Python 3.10 + cu128 独立环境 |
+| `/var/tmp/audio-studio/firered/FireRedAudio` | 官方代码仓浅克隆（inference.py / fireredaudio 包） |
+
+源码位于仓库 `services/firered-audio/`，在音乐机持久卷上执行 `bash deploy.sh` 即完成安装与启动（幂等，2026-10-13 已部署）。实际安装要点（均已固化在 `bootstrap.py`/`api.py`）：uv 托管 Python 3.10；官方代码仓 `uv sync --extra accel --group tools`，**跳过 `accel-build`**（本机 nvcc 为 CUDA 13.0 而官方锁 cu128，causal-conv1d/flash-attn 源码编译版本不匹配；flash-linear-attention 走纯 PyTorch 回退，推理可用）；另装 `fastapi`、`uvicorn`、`nvidia-npp-cu12`（torchcodec dlopen 需要 libnppicc.so.12）与 `modelscope`（下载权重用其 CLI 入口，`python -m modelscope` 不可用）。worker 子进程环境由 api.py 注入 `LD_LIBRARY_PATH`（`$RUNTIME/ffmpeg/lib` 提供 libav、nvidia/npp/lib 提供 NPP），PATH 前置 `ffmpeg/bin`。部署后需重启 `services/yue2`（懒加载改动）。手动启动：`setsid bash /project/daixinliang/audio-studio/services/firered-audio/start.sh </dev/null >>/var/tmp/audio-studio/firered-api.log 2>&1 &`。
+
+本地 `web/.env.local` 配置 `FIRERED_REMOTE_URL`（Jupyter `/proxy/8191` 地址）；token 在云端 `recover/firered-api.token`，复制到本地被 Git 忽略的 `data/firered-api.token`，或由 Vite 进程环境变量 `FIRERED_API_TOKEN` 提供。Vite `/firered` 代理仅接受本机画布请求并服务端注入 token。
+
+API：`POST /v1/firered/audio` 原始音频上传（sha256 去重，浏览器端不转码，服务端 ffmpeg 统一转 24kHz 单声道 WAV）；`POST /v1/firered/tasks` 提交任务（`tts` 克隆/声音设计、`edit` 语义编辑、`edit_acoustic` 固定模板声学编辑、`asr` 转写、`understand` 音频问答，UUID 与参数绑定，重复提交幂等）；`GET /v1/firered/tasks/{id}` 轮询阶段；`/content` 分块下载 WAV。输入时长上限默认：理解 10 分钟、编辑 30 分钟、克隆参考 2 分钟（`FIRERED_MAX_UNDERSTAND_MINUTES` 等环境变量可调）。克隆模式未填参考转写时，worker 先用同一模型 ASR 自动识别参考音频再合成。
+
+显存提示：生成类任务（tts/edit/edit_acoustic/voice_design）需同时加载主模型与解码器共约 29.6GB，32GB 卡接近上限，是否稳定待实测；理解类任务仅约 21.2GB。
+
+容器重建恢复：重建会清空 `/var/tmp`（firered-env、ffmpeg 等运行环境）并可能丢失 Jupyter 端口转发插件，但 `/project` 持久卷上的权重、任务记录与 `~/.local` 用户包保留。恢复顺序：先用系统 Python 建 `$RUNTIME/tools` venv 装 uv，重跑 `deploy.sh` 重建 firered-env 与代码仓；ffmpeg 用 micromamba 装到 `$RUNTIME/ffmpeg`（老 conda 4.5 因 lsb_release 损坏不可用）；`pip install --user jupyter-server-proxy` 后需重启 Jupyter 才会加载 `/proxy` 转发；最后 `setsid` 拉起 8191 服务。音乐机控制台经 `~/jexec-venv/bin/python /tmp/jexec-music.py "命令"` 执行。官方声明零样本声音克隆仅限学术研究用途，勿用于仿冒他人声音等场景。

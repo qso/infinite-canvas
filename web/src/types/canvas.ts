@@ -77,6 +77,13 @@ export type CanvasNodeMetadata = {
     audioFormat?: string;
     audioSpeed?: string;
     audioInstructions?: string;
+    // FireRedAudio（音频节点：clone 克隆 / design 声音设计 / edit 语义编辑；编辑时 prompt 为指令）。
+    audioFireRedMode?: "clone" | "design" | "edit";
+    audioFireRedTranscript?: string;
+    audioFireRedVoiceDesc?: string;
+    audioFireRedLanguage?: "auto" | "zh" | "en";
+    audioFireRedSeed?: string;
+    fireRedTaskId?: string; // 音频/文本节点的 FireRed 任务恢复编号。
     musicDraft?: MusicGenerationDraft;
     musicAnalysisId?: string;
     musicAnalysisRequest?: MusicAnalysisRequest;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, LoaderCircle, Maximize2, Square } from "lucide-react";
 import { Button, Modal, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
@@ -6,6 +6,8 @@ import { useTranslation } from "react-i18next";
 import { ModelPicker } from "@/components/model-picker";
 import { normalizeVideoModeValue } from "@/components/video-settings-panel";
 import { H3_REFERENCE_PROMPT_TEMPLATES, isMiniMaxH3 } from "@/constant/comfyui";
+import { isFireRedSpeech, isFireRedUnderstand } from "@/constant/firered";
+import { runFireRedUnderstandTask } from "@/lib/canvas/fire-red-generation";
 import { defaultConfig, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -44,9 +46,27 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = modeOverride ?? defaultMode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
-    const showReferenceTemplates = mode === "video" && isMiniMaxH3(config.model) && normalizeVideoModeValue(config.videoMode) === "reference";
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
+    // FireRedAudio 识别/理解：连接音频参考后允许空提示词（空 = 纯转写）。
+    const fireRedUnderstanding = mode === "text" && isFireRedUnderstand(config.model);
+    const hasAudioReference = connectedNodes.some((item) => (item.type === CanvasNodeType.Audio || item.type === CanvasNodeType.Music) && Boolean(item.metadata?.content)) || mentionReferences.some((reference) => reference.kind === "audio");
+    const allowEmptyPrompt = fireRedUnderstanding && hasAudioReference;
+    // FireRedAudio 语音：外层提示词含义随模式变化（编辑 = 指令，其余 = 要合成的文本）。
+    const fireRedSpeech = mode === "audio" && isFireRedSpeech(config.model);
+    const fireRedSpeechMode = node.metadata?.audioFireRedMode === "design" || node.metadata?.audioFireRedMode === "edit" ? node.metadata.audioFireRedMode : "clone";
+    const placeholderKey = fireRedUnderstanding
+        ? "fireRedUnderstand"
+        : fireRedSpeech
+          ? fireRedSpeechMode === "edit"
+                ? "fireRedEditText"
+                : "fireRedSpeechText"
+          : mode === "image" && hasImageContent
+            ? "editImage"
+            : mode === "text" && hasTextContent
+              ? "editText"
+              : mode;
+    const showReferenceTemplates = mode === "video" && isMiniMaxH3(config.model) && normalizeVideoModeValue(config.videoMode) === "reference";
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
     const [expanded, setExpanded] = useState(false);
@@ -63,9 +83,22 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
         else onPromptChange(node.id, value);
     };
 
+    // 声音克隆「自动识别」：用 FireRedAudio 自己的 ASR 转写第一个上游音频参考，填入参考转写框。
+    const fireRedTranscribeControllerRef = useRef<AbortController | null>(null);
+    const handleFireRedAutoTranscribe = useCallback(async (): Promise<string> => {
+        const reference = connectedNodes.find((item) => (item.type === CanvasNodeType.Audio || item.type === CanvasNodeType.Music) && item.metadata?.content);
+        if (!reference?.metadata?.content) throw new Error(t("canvas.fireRed.cloneNeedsAudio"));
+        fireRedTranscribeControllerRef.current?.abort();
+        const controller = new AbortController();
+        fireRedTranscribeControllerRef.current = controller;
+        const result = await runFireRedUnderstandTask("", [{ id: reference.id, name: `${reference.title || reference.id}.wav`, type: reference.metadata.mimeType || "audio/wav", url: reference.metadata.content, storageKey: reference.metadata.storageKey, durationMs: reference.metadata.durationMs }], false, { signal: controller.signal, onTaskId: () => {} });
+        return result.text;
+    }, [connectedNodes, t]);
+
     const submit = () => {
+        if (isRunning) return;
         const text = prompt.trim();
-        if (!text || isRunning) return;
+        if (!text && !allowEmptyPrompt) return;
         onGenerate(node.id, mode, text);
     };
 
@@ -91,7 +124,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                 onSubmit={submit}
                 className="thin-scrollbar h-40 w-full cursor-text resize-none rounded-xl px-3 py-2 text-sm leading-5 outline-none"
                 style={{ background: "transparent", color: theme.node.text }}
-                placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
+                placeholder={t(`canvas.promptPanel.${placeholderKey}`)}
             />
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
@@ -120,7 +153,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                     ) : mode === "audio" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
-                            <CanvasAudioSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                            <CanvasAudioSettingsPopover config={config} metadata={node.metadata} hasAudioReference={hasAudioReference} onAutoTranscribe={handleFireRedAutoTranscribe} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
                     ) : (
                         <>
@@ -133,7 +166,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                     type="primary"
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
                     danger={isRunning}
-                    disabled={!isRunning && !prompt.trim()}
+                    disabled={!isRunning && !prompt.trim() && !allowEmptyPrompt}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={t(isRunning ? "canvas.promptPanel.stopGeneration" : "canvas.promptPanel.generate")}
                 >
@@ -160,7 +193,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                         onChange={updatePrompt}
                         className="thin-scrollbar h-[52dvh] min-h-80 w-full cursor-text overflow-y-auto rounded-xl border p-4 text-[15px] leading-6 outline-none"
                         style={{ background: "transparent", borderColor: theme.toolbar.border, color: theme.node.text }}
-                        placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
+                        placeholder={t(`canvas.promptPanel.${placeholderKey}`)}
                     />
                 </div>
             </Modal>
@@ -225,9 +258,14 @@ function videoConfigPatch(key: keyof AiConfig, value: string) {
     return { [key]: value };
 }
 
-function audioConfigPatch(key: CanvasAudioSettingKey, value: string) {
+function audioConfigPatch(key: CanvasAudioSettingKey, value: string): Partial<CanvasNodeData["metadata"]> {
     if (key === "audioVoice") return { audioVoice: value };
     if (key === "audioFormat") return { audioFormat: value };
     if (key === "audioSpeed") return { audioSpeed: value };
-    return { audioInstructions: value };
+    if (key === "audioInstructions") return { audioInstructions: value };
+    if (key === "audioFireRedMode") return { audioFireRedMode: value === "design" || value === "edit" ? value : "clone" };
+    if (key === "audioFireRedTranscript") return { audioFireRedTranscript: value };
+    if (key === "audioFireRedVoiceDesc") return { audioFireRedVoiceDesc: value };
+    if (key === "audioFireRedLanguage") return { audioFireRedLanguage: value === "en" || value === "zh" ? value : "auto" };
+    return { audioFireRedSeed: value };
 }

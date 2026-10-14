@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
 import { H3_DEFAULT_STEPS, isMiniMaxH3, MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION } from "@/constant/comfyui";
+import { FIRERED_SPEECH_OPTION, FIRERED_UNDERSTAND_OPTION, isFireRedModel, isFireRedSpeech, isFireRedUnderstand } from "@/constant/firered";
 
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -170,6 +171,8 @@ const IMAGE_KEYWORDS = ["seedream", "gpt-image", "image", "dall-e", "dalle", "im
 /** Best-effort default capability for a freshly fetched model name; user can override in the channel editor. */
 export function guessCapability(name: string): ModelCapability {
     if (isMiniMaxH3(name)) return "video";
+    if (isFireRedUnderstand(name)) return "text";
+    if (isFireRedSpeech(name)) return "audio";
     const value = name.toLowerCase();
     if (VIDEO_KEYWORDS.some((keyword) => value.includes(keyword))) return "video";
     if (AUDIO_KEYWORDS.some((keyword) => value.includes(keyword))) return "audio";
@@ -187,6 +190,8 @@ function findChannelModel(config: AiConfig, value: string): { channel: ModelChan
 
 export function modelCapabilityOf(config: AiConfig, value: string): ModelCapability | undefined {
     if (isMiniMaxH3(value)) return "video";
+    if (isFireRedUnderstand(value)) return "text";
+    if (isFireRedSpeech(value)) return "audio";
     return findChannelModel(config, value)?.model.capability;
 }
 
@@ -210,7 +215,8 @@ export function resolveModelForCapability(config: AiConfig, currentModel: string
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
     const models = capability ? config.channels.flatMap((channel) => channel.models.filter((model) => model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name))) : config.models;
-    return Array.from(new Set([...(!capability || capability === "video" ? [MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION] : []), ...models]));
+    const builtin = !capability || capability === "video" ? [MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION] : capability === "audio" ? [FIRERED_SPEECH_OPTION] : capability === "text" ? [FIRERED_UNDERSTAND_OPTION] : [];
+    return Array.from(new Set([...builtin, ...models]));
 }
 
 /** The user script (if any) attached to a model; empty string means use the system default call. */
@@ -219,7 +225,7 @@ export function resolveModelScript(config: AiConfig, value: string) {
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
-    if (isMiniMaxH3(model)) return true;
+    if (isMiniMaxH3(model) || isFireRedModel(model)) return true;
     const match = findChannelModel(config, model);
     return Boolean(match && match.channel.baseUrl.trim() && match.channel.apiKey.trim());}
 
@@ -421,6 +427,8 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     // that happens to be named like MiniMax-H3 keeps its channel label instead.
     if (value === MINIMAX_H3_FAST_OPTION) return "MiniMax H3 加速版（云端 ComfyUI）";
     if (value === MINIMAX_H3_OPTION) return "MiniMax-H3（云端 ComfyUI）";
+    if (value === FIRERED_SPEECH_OPTION) return "FireRedAudio 语音（云端 5090）";
+    if (value === FIRERED_UNDERSTAND_OPTION) return "FireRedAudio 识别与理解（云端 5090）";
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
@@ -434,7 +442,7 @@ export function modelOptionsFromChannels(channels: ModelChannel[]) {
 export function normalizeModelOptionValue(value: string | undefined, channels: ModelChannel[]) {
     const model = (value || "").trim();
     if (!model) return "";
-    if (model === MINIMAX_H3_OPTION || model === MINIMAX_H3_FAST_OPTION) return model;
+    if (model === MINIMAX_H3_OPTION || model === MINIMAX_H3_FAST_OPTION || isFireRedModel(model)) return model;
     const decoded = decodeChannelModel(model);
     if (decoded) {
         const channel = channels.find((item) => item.id === decoded.channelId);

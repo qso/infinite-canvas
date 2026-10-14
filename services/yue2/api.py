@@ -370,15 +370,13 @@ class MusicService:
 
     def run(self):
         pipe = None
+        defaults = None
         try:
             import soundfile as sf
             from yue2 import YuE2Pipeline
 
-            pipe = YuE2Pipeline.from_pretrained(
-                str(ROOT / "models/YuE2-3B"), vae=str(ROOT / "models/YuE2-Vae"),
-                local_files_only=True, device="cuda", backend="torch", quantization="none",
-            )
-            defaults = pipe.generation_config
+            # Lazy load: FireRedAudio shares this GPU and needs the full card for its
+            # generation tasks, so the pipeline is loaded per job and unloaded after it.
             self.state = "ready"
             while True:
                 with self.wake:
@@ -394,7 +392,9 @@ class MusicService:
                     if self.stop.is_set():
                         break
                 if analysis:
-                    pipe.close()
+                    if pipe is not None:
+                        pipe.close()
+                        pipe = None
                     try:
                         self.run_analysis(analysis)
                     except Exception as exc:
@@ -406,6 +406,13 @@ class MusicService:
                 instrumental = request["output_type"] == "instrumental"
                 transfer = None
                 try:
+                    if pipe is None:
+                        self.update(job_id, stage="loading")
+                        pipe = YuE2Pipeline.from_pretrained(
+                            str(ROOT / "models/YuE2-3B"), vae=str(ROOT / "models/YuE2-Vae"),
+                            local_files_only=True, device="cuda", backend="torch", quantization="none",
+                        )
+                        defaults = pipe.generation_config
                     pipe.generation_config = dataclasses.replace(defaults, ode_steps=request["steps"])
                     actual = {"style": request["style"], "lyrics": request["lyrics"], "abc": request["abc"], "cot": request["cot"]}
                     if request["reference"]:
@@ -488,7 +495,9 @@ class MusicService:
                     self.update(job_id, status="failed", stage="failed", error=str(exc))
                 finally:
                     plan = semantic = latents = audio = None
-                    pipe.generation_config = defaults
+                    if pipe is not None:
+                        pipe.close()
+                        pipe = None
         except Exception as exc:
             logger.exception("YuE2 worker failed")
             with self.lock:
