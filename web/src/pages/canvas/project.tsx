@@ -11,6 +11,9 @@ import { waitForQwenImageTasks } from "@/services/api/comfyui-qwen";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createMusicAnalysis, createMusicGenerationTask, getMusicGenerationContent, getMusicGenerationScore, MusicApiError, uploadMusicReference, waitForMusicAnalysis, waitForMusicGenerationTask } from "@/services/api/music";
 import { MUSIC_ENDPOINT, MUSIC_MODEL, type MusicAnalysisRequest } from "@/constant/music";
+import { isFireRedSpeech, isFireRedUnderstand, FIRERED_ACOUSTIC_LIMITS, FIRERED_SPEECH_OPTION } from "@/constant/firered";
+import { fireRedSpeechMetadata, fireRedSpeechSettings, resumeFireRedAudio, resumeFireRedTextResult, runFireRedAcousticEditTask, runFireRedSpeechTask, runFireRedUnderstandTask } from "@/lib/canvas/fire-red-generation";
+import { FireRedApiError } from "@/services/api/firered";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { ensureImagePreview, uploadImage } from "@/services/image-storage";
@@ -24,7 +27,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "@/lib/canvas/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { captureVideoFrame, type VideoFramePosition } from "@/lib/canvas/canvas-video-frame";
-import { App, Button, Modal } from "antd";
+import { App, Button, Modal, Slider } from "antd";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
 import { ActiveConnectionPath, ConnectionPath } from "@/components/canvas/canvas-connections";
 import { CanvasConfigComposer } from "@/components/canvas/canvas-config-composer";
@@ -275,6 +278,9 @@ function InfiniteCanvasPage() {
     const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
     const [superResolveNodeId, setSuperResolveNodeId] = useState<string | null>(null);
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
+    const [acousticEditNodeId, setAcousticEditNodeId] = useState<string | null>(null);
+    const [acousticValues, setAcousticValues] = useState({ speed: 1, pitch: 0, volume: 1 });
+    const [acousticRunning, setAcousticRunning] = useState(false);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const [hoverPreviewNodeId, setHoverPreviewNodeId] = useState<string | null>(null);
     const [previewImageId, setPreviewImageId] = useState<string | null>(null);
@@ -2832,7 +2838,9 @@ function InfiniteCanvasPage() {
                 return;
             }
             const markSourceStatus = sourceNode?.type !== CanvasNodeType.Image && !editingTextNode;
-            if (!effectivePrompt && (mode === "text" || mode === "audio")) {
+            // FireRedAudio 识别/理解允许空提示词（空 = 纯转写）；音频合成仍必须有合成文本。
+            const allowEmptyPrompt = mode === "text" && isFireRedUnderstand(generationConfig.model);
+            if (!effectivePrompt && (mode === "text" || mode === "audio") && !allowEmptyPrompt) {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
                 return;
@@ -3028,6 +3036,7 @@ function InfiniteCanvasPage() {
                     const reuseAudioNode = sourceNode?.type === CanvasNodeType.Audio && (overwriteExisting || isEmptyAudioNode);
                     const audioId = reuseAudioNode ? nodeId : nanoid();
                     const parent = sourceNode?.position || { x: 0, y: 0 };
+                    const fireRedSettings = isFireRedSpeech(generationConfig.model) ? fireRedSpeechSettings(sourceNode?.metadata || {}) : null;
                     const audioNode: CanvasNodeData = {
                         id: audioId,
                         type: CanvasNodeType.Audio,
@@ -3035,7 +3044,7 @@ function InfiniteCanvasPage() {
                         position: reuseAudioNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y + ((sourceNode?.height || spec.height) - spec.height) / 2 },
                         width: reuseAudioNode ? sourceNode.width : spec.width,
                         height: reuseAudioNode ? sourceNode.height : spec.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, ...buildAudioGenerationMetadata(generationConfig) },
+                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, ...(fireRedSettings ? fireRedSpeechMetadata(fireRedSettings, generationConfig.model) : buildAudioGenerationMetadata(generationConfig)) },
                     };
                     pendingChildIds = [audioId];
                     setNodes((prev) =>
@@ -3046,8 +3055,18 @@ function InfiniteCanvasPage() {
                     if (!reuseAudioNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: audioId }]);
                     const controller = startGenerationRequest(audioId, nodeId, nodeId, runController);
                     try {
-                        const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, effectivePrompt, { signal: controller.signal }), generationConfig.audioFormat);
-                        setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)));
+                        const audio = fireRedSettings
+                            ? await storeGeneratedAudio(
+                                  (
+                                      await runFireRedSpeechTask(effectivePrompt, fireRedSettings, generationContext.referenceAudios, {
+                                          signal: controller.signal,
+                                          onTaskId: (taskId) => setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, fireRedTaskId: taskId } } : node))),
+                                      })
+                                  ).blob,
+                                  "wav",
+                              )
+                            : await storeGeneratedAudio(await requestAudioGeneration(generationConfig, effectivePrompt, { signal: controller.signal }), generationConfig.audioFormat);
+                        setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: effectivePrompt, ...(fireRedSettings ? fireRedSpeechMetadata(fireRedSettings, generationConfig.model) : buildAudioGenerationMetadata(generationConfig)) } } : node)));
                     } finally {
                         finishGenerationRequest(audioId, controller);
                     }
@@ -3093,8 +3112,43 @@ function InfiniteCanvasPage() {
                 setDialogNodeId(nodeId);
 
                 const controller = rootId === nodeId ? runController : startGenerationRequest(rootId, nodeId, nodeId, runController);
+                // FireRedAudio 识别/理解：音频引用 → 单次任务产出转写或音频问答，多个备选文本共用同一结果。
+                if (isFireRedUnderstand(generationConfig.model) && !generationContext.referenceAudios.length) throw new Error(t("canvas.fireRed.understandNeedsAudio"));
+                const fireRedUnderstanding = isFireRedUnderstand(generationConfig.model) && generationContext.referenceAudios.length > 0;
+                let fireRedAnswer: string | null = null;
+                if (fireRedUnderstanding) {
+                    try {
+                        const understood = await runFireRedUnderstandTask(effectivePrompt, generationContext.referenceAudios, generationConfig.reasoningEffort !== "auto", {
+                            signal: controller.signal,
+                            onTaskId: (taskId) => setNodes((prev) => prev.map((node) => (node.id === rootId ? { ...node, metadata: { ...node.metadata, fireRedTaskId: taskId } } : node))),
+                        });
+                        fireRedAnswer = understood.text;
+                    } catch (error) {
+                        if (isGenerationCanceled(error)) return;
+                        const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                        setNodes((prev) =>
+                            prev.map((node) =>
+                                node.id === rootId
+                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails, texts: node.metadata?.texts?.map((item) => ({ ...item, status: NODE_STATUS_ERROR, errorDetails })) } }
+                                    : node,
+                            ),
+                        );
+                        if (rootId !== nodeId) finishGenerationRequest(rootId, controller);
+                        return;
+                    }
+                }
                 const results = await Promise.all(
                     textIds.map(async (textId): Promise<CanvasNodeText | null> => {
+                        if (fireRedAnswer !== null) {
+                            setNodes((prev) =>
+                                prev.map((node) =>
+                                    node.id === rootId
+                                        ? { ...node, metadata: { ...node.metadata, ...(node.metadata?.primaryTextId === textId ? { content: fireRedAnswer } : {}), texts: node.metadata?.texts?.map((item) => (item.id === textId ? { ...item, content: fireRedAnswer, status: NODE_STATUS_SUCCESS } : item)) } }
+                                        : node,
+                                ),
+                            );
+                            return { id: textId, status: NODE_STATUS_SUCCESS, content: fireRedAnswer } satisfies CanvasNodeText;
+                        }
                         let streamed = "";
                         try {
                             const answer = await requestImageQuestion(
@@ -3233,7 +3287,8 @@ function InfiniteCanvasPage() {
 
             const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
             const prompt = (savedImageMetadata?.prompt || context?.prompt || "").trim();
-            if (!prompt) {
+            const isFireRedText = node.type === CanvasNodeType.Text && isFireRedUnderstand(generationConfig.model);
+            if (!prompt && !isFireRedText) {
                 message.warning(t("canvas.projectPage.retryPromptMissing"));
                 return;
             }
@@ -3255,6 +3310,26 @@ function InfiniteCanvasPage() {
             try {
                 if (node.type === CanvasNodeType.Text) {
                     if (!context) return;
+                    const resumeTaskId = isFireRedUnderstand(generationConfig.model) && context.referenceAudios.length ? node.metadata?.fireRedTaskId : undefined;
+                    if (resumeTaskId) {
+                        try {
+                            const answer = await resumeFireRedTextResult(resumeTaskId, { signal: controller.signal });
+                            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: answer, prompt, status: NODE_STATUS_SUCCESS, texts: item.metadata?.texts?.map((text) => ({ ...text, content: answer, status: NODE_STATUS_SUCCESS, errorDetails: undefined })) } } : item)));
+                            return;
+                        } catch (error) {
+                            const missing = error instanceof FireRedApiError && error.status === 404;
+                            if (!missing) throw error;
+                            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, fireRedTaskId: undefined } } : item)));
+                        }
+                    }
+                    if (isFireRedUnderstand(generationConfig.model) && context.referenceAudios.length) {
+                        const answer = await runFireRedUnderstandTask(prompt, context.referenceAudios, generationConfig.reasoningEffort !== "auto", {
+                            signal: controller.signal,
+                            onTaskId: (taskId) => setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, fireRedTaskId: taskId } } : item))),
+                        });
+                        setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: answer.text, prompt, status: NODE_STATUS_SUCCESS, texts: item.metadata?.texts?.map((text) => ({ ...text, content: answer.text, status: NODE_STATUS_SUCCESS, errorDetails: undefined })) } } : item)));
+                        return;
+                    }
                     let streamed = "";
                     const answer = await requestImageQuestion(
                         generationConfig,
@@ -3284,8 +3359,30 @@ function InfiniteCanvasPage() {
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
-                    const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, prompt, { signal: controller.signal }), generationConfig.audioFormat);
-                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), prompt, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
+                    const fireRedSettings = isFireRedSpeech(generationConfig.model) ? fireRedSpeechSettings(node.metadata || {}) : null;
+                    const resumeTaskId = fireRedSettings ? node.metadata?.fireRedTaskId : undefined;
+                    let audio: UploadedFile | null = null;
+                    if (resumeTaskId) {
+                        try {
+                            audio = await storeGeneratedAudio(await resumeFireRedAudio(resumeTaskId, { signal: controller.signal }), "wav");
+                        } catch (error) {
+                            const missing = error instanceof FireRedApiError && error.status === 404;
+                            if (!missing) throw error;
+                            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, fireRedTaskId: undefined } } : item)));
+                        }
+                    }
+                    if (!audio) {
+                        const blob = fireRedSettings
+                            ? (
+                                  await runFireRedSpeechTask(prompt, fireRedSettings, context?.referenceAudios || [], {
+                                      signal: controller.signal,
+                                      onTaskId: (taskId) => setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, fireRedTaskId: taskId } } : item))),
+                                  })
+                              ).blob
+                            : await requestAudioGeneration(generationConfig, prompt, { signal: controller.signal });
+                        audio = await storeGeneratedAudio(blob, fireRedSettings ? "wav" : generationConfig.audioFormat);
+                    }
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), prompt, ...(fireRedSettings ? fireRedSpeechMetadata(fireRedSettings, generationConfig.model) : buildAudioGenerationMetadata(generationConfig)) } } : item)));
                     return;
                 }
 
@@ -3377,6 +3474,53 @@ function InfiniteCanvasPage() {
     }, []);
 
     const retryBatchImage = useCallback((node: CanvasNodeData, imageId: string) => void handleRetryNode(node, imageId), [handleRetryNode]);
+
+    // 音频节点 hover「声学调节」：滑杆值 → 官方固定模板编辑，派生新音频节点，原音频保留。
+    const handleAcousticEditSubmit = useCallback(async () => {
+        const node = nodesRef.current.find((item) => item.id === acousticEditNodeId);
+        if (!node || !node.metadata?.content || acousticRunning) return;
+        const { speed, pitch, volume } = acousticValues;
+        if (speed === 1 && pitch === 0 && volume === 1) {
+            message.warning(t("canvas.fireRed.acoustic.nothingToDo"));
+            return;
+        }
+        const descriptionParts = [speed !== 1 ? `${t("canvas.fireRed.acoustic.speed")} ${speed}×` : "", pitch !== 0 ? `${t("canvas.fireRed.acoustic.pitch")} ${pitch > 0 ? "+" : ""}${pitch}` : "", volume !== 1 ? `${t("canvas.fireRed.acoustic.volume")} ${volume}×` : ""].filter(Boolean);
+        const description = descriptionParts.join(" · ");
+        setAcousticRunning(true);
+        const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
+        const audioId = nanoid();
+        const derived: CanvasNodeData = {
+            id: audioId,
+            type: CanvasNodeType.Audio,
+            title: `${t("canvas.fireRed.acoustic.title")} · ${(node.title || "").slice(0, 16)}`,
+            position: { x: node.position.x + node.width + 96, y: node.position.y + (node.height - spec.height) / 2 },
+            width: spec.width,
+            height: spec.height,
+            metadata: { prompt: description, status: NODE_STATUS_LOADING, model: FIRERED_SPEECH_OPTION },
+        };
+        setNodes((prev) => [...prev, derived]);
+        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: audioId }]);
+        const controller = startGenerationRequest(audioId, node.id, audioId);
+        try {
+            const reference: ReferenceAudio = { id: node.id, name: `${node.title || node.id}.wav`, type: node.metadata.mimeType || "audio/wav", url: node.metadata.content, storageKey: node.metadata.storageKey, durationMs: node.metadata.durationMs };
+            const result = await runFireRedAcousticEditTask(reference, { speed, pitch, volume }, {
+                signal: controller.signal,
+                onTaskId: (taskId) => setNodes((prev) => prev.map((item) => (item.id === audioId ? { ...item, metadata: { ...item.metadata, fireRedTaskId: taskId } } : item))),
+            });
+            const audio = await storeGeneratedAudio(result.blob, "wav");
+            setNodes((prev) => prev.map((item) => (item.id === audioId ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), prompt: description } } : item)));
+            setAcousticEditNodeId(null);
+        } catch (error) {
+            if (!isGenerationCanceled(error)) {
+                const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                message.error(errorDetails);
+                setNodes((prev) => prev.map((item) => (item.id === audioId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
+            }
+        } finally {
+            finishGenerationRequest(audioId, controller);
+            setAcousticRunning(false);
+        }
+    }, [acousticEditNodeId, acousticRunning, acousticValues, finishGenerationRequest, message, setConnections, setNodes, startGenerationRequest, t]);
 
     const generateImageFromTextNode = useCallback(
         (node: CanvasNodeData) => {
@@ -3821,6 +3965,11 @@ function InfiniteCanvasPage() {
                     onViewImage={handleNodeViewImage}
                     onReversePrompt={createImageReversePromptNodes}
                     onRetry={(node) => void handleRetryNode(node)}
+                    onAcousticEdit={(node) => {
+                        setAcousticValues({ speed: 1, pitch: 0, volume: 1 });
+                        setAcousticEditNodeId(node.id);
+                    }}
+                    showAcousticEdit={toolbarNode ? isFireRedSpeech(toolbarNode.metadata?.model || effectiveConfig.audioModel || effectiveConfig.model) : false}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}
                     onUngroup={(node) => ungroupSelection(new Set([node.id]))}
@@ -3919,6 +4068,29 @@ function InfiniteCanvasPage() {
                 </Modal>
 
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
+                <Modal
+                    title={t("canvas.fireRed.acoustic.title")}
+                    open={Boolean(acousticEditNodeId)}
+                    centered
+                    onCancel={() => {
+                        if (!acousticRunning) setAcousticEditNodeId(null);
+                    }}
+                    onOk={() => void handleAcousticEditSubmit()}
+                    okText={t("canvas.fireRed.acoustic.generate")}
+                    cancelText={t("common.cancel")}
+                    okButtonProps={{ loading: acousticRunning }}
+                    cancelButtonProps={{ disabled: acousticRunning }}
+                    width={380}
+                >
+                    <div data-canvas-no-zoom className="space-y-5 py-2" style={{ color: theme.node.text }}>
+                        <p className="!m-0 text-xs leading-5" style={{ color: theme.node.muted }}>
+                            {t("canvas.fireRed.acoustic.hint")}
+                        </p>
+                        <AcousticSlider label={t("canvas.fireRed.acoustic.speed")} value={acousticValues.speed} onChange={(speed) => setAcousticValues((current) => ({ ...current, speed }))} {...FIRERED_ACOUSTIC_LIMITS.speed} format={(value) => `${value}×`} />
+                        <AcousticSlider label={t("canvas.fireRed.acoustic.pitch")} value={acousticValues.pitch} onChange={(pitch) => setAcousticValues((current) => ({ ...current, pitch }))} {...FIRERED_ACOUSTIC_LIMITS.pitch} format={(value) => (value > 0 ? `+${value}` : `${value}`)} />
+                        <AcousticSlider label={t("canvas.fireRed.acoustic.volume")} value={acousticValues.volume} onChange={(volume) => setAcousticValues((current) => ({ ...current, volume }))} {...FIRERED_ACOUSTIC_LIMITS.volume} format={(value) => `${value}×`} />
+                    </div>
+                </Modal>
 
                 <Modal
                     title={t("canvas.projectPage.imageDetails")}
@@ -3952,5 +4124,18 @@ function InfiniteCanvasPage() {
                 <AssetPickerModal open={assetPickerOpen} onInsert={handleAssetInsert} onClose={() => setAssetPickerOpen(false)} />
             </section>
         </main>
+    );
+}
+
+function AcousticSlider({ label, value, onChange, min, max, step, neutral, format }: { label: string; value: number; onChange: (value: number) => void; min: number; max: number; step: number; neutral: number; format: (value: number) => string }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    return (
+        <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+                <span style={{ color: theme.node.muted }}>{label}</span>
+                <span>{value === neutral ? <span style={{ color: theme.node.muted }}>—</span> : format(value)}</span>
+            </div>
+            <Slider min={min} max={max} step={step} value={value} onChange={onChange} className="!m-0" tooltip={{ formatter: (sliderValue) => (typeof sliderValue === "number" ? format(sliderValue) : "") }} />
+        </div>
     );
 }
