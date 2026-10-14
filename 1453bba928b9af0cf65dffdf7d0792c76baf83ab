@@ -1,0 +1,186 @@
+services/firered-audio/bootstrap.py
+  16cc7476d377ede2 1-85
+services/firered-audio/worker.py
+  16cc7476d377ede2 1-156
+web/src/components/canvas/canvas-node-prompt-panel.tsx
+  16cc7476d377ede2 1,9-10,51-68,86-97,99,101,127,156,169,196,261,265-270
+web/src/components/audio-settings-panel.tsx
+  16cc7476d377ede2 1,3,7,10,14,20-22,27,37-167,169-171,173,177-202,214,216-219
+web/vite.config.ts
+  16cc7476d377ede2 59-84,86-92,94
+docs/content/docs/progress/pending-test.mdx
+  16cc7476d377ede2 10-11
+services/firered-audio/api.py
+  16cc7476d377ede2 1-402
+web/src/services/api/firered.ts
+  16cc7476d377ede2 1-151
+services/yue2/api.py
+  16cc7476d377ede2 373,378-379,395-397,409-415,498-500
+web/.env.local
+  16cc7476d377ede2 5
+web/src/pages/canvas/project.tsx
+  16cc7476d377ede2 13-15,29,279-281,2756-2758,2978,2986,2997-3008,3054-3078,3081-3090,3229-3230,3252-3271,3301-3324,3417-3463,3907-3911,4010-4032,4068-4080
+web/src/constant/firered.ts
+  16cc7476d377ede2 1-55
+web/src/i18n/locales/zh-CN.ts
+  16cc7476d377ede2 272-280,324
+docs/content/docs/development/local-development.mdx
+  16cc7476d377ede2 61-84
+web/src/stores/use-config-store.ts
+  16cc7476d377ede2 8,174-175,193-194,218-219,228,430-431,445
+web/src/types/canvas.ts
+  16cc7476d377ede2 80-86
+services/firered-audio/start.sh
+  16cc7476d377ede2 1-19
+web/src/components/canvas/canvas-node-hover-toolbar.tsx
+  16cc7476d377ede2 3,42-43,82-83,166
+web/src/lib/canvas/fire-red-generation.ts
+  16cc7476d377ede2 1-129
+services/firered-audio/deploy.sh
+  16cc7476d377ede2 1-17
+docs/content/docs/progress/todo.mdx
+  16cc7476d377ede2 8-11
+web/src/i18n/locales/en-US.ts
+  16cc7476d377ede2 272-280,324
+CHANGELOG.md
+  16cc7476d377ede2 5-11
+web/src/components/canvas/canvas-audio-settings-popover.tsx
+  16cc7476d377ede2 6-7,9,13,15,20-22,27,33-35,58,64,72-74,83-85,93-95,128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "1453bba928b9af0cf65dffdf7d0792c76baf83ab",
+  "prompts": {
+    "16cc7476d377ede2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a80694f0-b7f9-4444-bf40-afcd3879828d",
+        "model": "glm-5.3"
+      },
+      "human_author": "hzlizhaoming",
+      "messages": [],
+      "total_additions": 1720,
+      "total_deletions": 252,
+      "accepted_lines": 1588,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "web/src/i18n/locales/zh-CN.ts": {
+          "additions": 15,
+          "deletions": 6,
+          "accepted_lines": 10
+        },
+        "web/.env.local": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "services/firered-audio/bootstrap.py": {
+          "additions": 87,
+          "deletions": 2,
+          "accepted_lines": 85
+        },
+        "web/src/constant/firered.ts": {
+          "additions": 55,
+          "accepted_lines": 55
+        },
+        "docs/content/docs/progress/pending-test.mdx": {
+          "additions": 4,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "web/src/pages/canvas/project.tsx": {
+          "additions": 205,
+          "deletions": 20,
+          "accepted_lines": 193
+        },
+        "services/firered-audio/worker.py": {
+          "additions": 184,
+          "deletions": 28,
+          "accepted_lines": 156
+        },
+        "web/src/services/api/firered.ts": {
+          "additions": 168,
+          "deletions": 17,
+          "accepted_lines": 151
+        },
+        "web/src/lib/canvas/fire-red-generation.ts": {
+          "additions": 149,
+          "deletions": 20,
+          "accepted_lines": 129
+        },
+        "web/src/stores/use-config-store.ts": {
+          "additions": 11,
+          "deletions": 3,
+          "accepted_lines": 11
+        },
+        "services/yue2/api.py": {
+          "additions": 16,
+          "deletions": 7,
+          "accepted_lines": 16
+        },
+        "web/src/i18n/locales/en-US.ts": {
+          "additions": 15,
+          "deletions": 6,
+          "accepted_lines": 10
+        },
+        "web/src/components/canvas/canvas-node-hover-toolbar.tsx": {
+          "additions": 6,
+          "deletions": 1,
+          "accepted_lines": 6
+        },
+        "services/firered-audio/start.sh": {
+          "additions": 19,
+          "accepted_lines": 19
+        },
+        "web/src/types/canvas.ts": {
+          "additions": 8,
+          "deletions": 1,
+          "accepted_lines": 7
+        },
+        "web/src/components/canvas/canvas-audio-settings-popover.tsx": {
+          "additions": 29,
+          "deletions": 11,
+          "accepted_lines": 26
+        },
+        "web/vite.config.ts": {
+          "additions": 34,
+          "deletions": 26,
+          "accepted_lines": 34
+        },
+        "services/firered-audio/api.py": {
+          "additions": 403,
+          "deletions": 1,
+          "accepted_lines": 402
+        },
+        "web/src/components/audio-settings-panel.tsx": {
+          "additions": 201,
+          "deletions": 79,
+          "accepted_lines": 175
+        },
+        "docs/content/docs/development/local-development.mdx": {
+          "additions": 26,
+          "deletions": 2,
+          "accepted_lines": 24
+        },
+        "CHANGELOG.md": {
+          "additions": 7,
+          "accepted_lines": 7
+        },
+        "web/src/components/canvas/canvas-node-prompt-panel.tsx": {
+          "additions": 55,
+          "deletions": 17,
+          "accepted_lines": 48
+        },
+        "docs/content/docs/progress/todo.mdx": {
+          "additions": 5,
+          "deletions": 3,
+          "accepted_lines": 4
+        },
+        "services/firered-audio/deploy.sh": {
+          "additions": 17,
+          "accepted_lines": 17
+        }
+      }
+    }
+  }
+}
