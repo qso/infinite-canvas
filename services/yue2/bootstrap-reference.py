@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
+from urllib.parse import unquote, urlparse
 
 ROOT = Path(os.environ.get("AUDIO_STUDIO_ROOT", "/project/daixinliang/audio-studio"))
 RUNTIME = Path(os.environ.get("AUDIO_STUDIO_RUNTIME", "/var/tmp/audio-studio"))
@@ -70,7 +71,9 @@ if not (ffmpeg / "bin/ffmpeg").is_file():
 flamingo = RUNTIME / "flamingo-env"
 if not (flamingo / "bin/python").is_file():
     run([sys.executable, "-m", "venv", flamingo], env=env)
-run([flamingo / "bin/python", "-m", "pip", "install", RUNTIME / "downloads/torch-2.10.0+cu130-cp313-cp313-manylinux_2_28_x86_64.whl", "-r", SOURCE / "requirements-flamingo.txt", "--index-url", INDEX], env=env)
+torch_url = os.environ.get("YUE2_TORCH_URL")
+torch_wheel = unquote(urlparse(torch_url).path).rsplit("/", 1)[-1] if torch_url else "torch-2.10.0+cu130-cp313-cp313-manylinux_2_28_x86_64.whl"
+run([flamingo / "bin/python", "-m", "pip", "install", RUNTIME / "downloads" / torch_wheel, "-r", SOURCE / "requirements-flamingo.txt", "--index-url", INDEX], env=env)
 
 models = (
     ("m-a-p/SheetSage2", "32c7c7473e7b59e1ed36bd8a8fefbd11ae8d468a", "SheetSage2", "b235f68091a5f5b644000f2b5acb57d1e70432aca2b34ab1b9cf27236e1f4274"),

@@ -19,7 +19,7 @@ WHEEL_HASH = "8801e2c0d969db02df78d2994150b4ccd86077d87c24fdb8509b1f6f31462641"
 HUB_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
 PYPI_INDEX = os.environ.get("PIP_INDEX_URL", "https://pypi.org/simple")
 TORCH_URL = os.environ.get("YUE2_TORCH_URL", "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313-manylinux_2_28_x86_64.whl")
-TORCH_HASH = "7e0d9922e9e91f780b2761a0c5ebac3c15c9740bab042e1b59149afa6d6474eb"
+TORCH_HASH = os.environ.get("YUE2_TORCH_SHA256", "7e0d9922e9e91f780b2761a0c5ebac3c15c9740bab042e1b59149afa6d6474eb")
 
 
 def digest(path):
@@ -99,7 +99,7 @@ with (ROOT / "recover/requirements-lock.txt").open("w") as output:
     subprocess.run([python, "-m", "pip", "freeze"], stdout=output, check=True, env=env)
 (ROOT / "recover/runtime.json").write_text(json.dumps({
     "python": sys.version, "base_interpreter": sys.executable, "runtime": str(environment),
-    "torch": "2.10.0+cu130", "model_revision": MODEL_REVISION, "vae_revision": VAE_REVISION,
+    "torch": unquote(Path(urlparse(TORCH_URL).path).name), "model_revision": MODEL_REVISION, "vae_revision": VAE_REVISION,
     "inference_wheel": WHEEL, "inference_sha256": digest(wheel),
     "model_dtype": "bfloat16", "vae_dtype": "float32", "quantization": "none",
 }, ensure_ascii=False, indent=2) + "\n")

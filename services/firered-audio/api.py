@@ -1,9 +1,9 @@
 """FireRedAudio task service.
 
-Shares the second RTX 5090 with the YuE2 music service: every task runs in a fresh
-worker subprocess that loads the model, writes the output and exits, so the GPU is
-free again between tasks (YuE2 unloads after each job as well). The service itself
-never imports torch.
+Owns the second RTX 5090 alone (YuE2 moved to a dedicated 4090): a resident
+worker process loads the engine once and keeps it across tasks. The worker
+frees the GPU after FIRERED_IDLE_UNLOAD_SECONDS without work (default 1800)
+and reloads on the next task. The service itself never imports torch.
 
 Endpoints (Bearer token, same loopback-only proxy contract as /yue2):
     GET  /health
@@ -139,6 +139,67 @@ def write_json(path: Path, value):
     temporary.replace(path)
 
 
+class ResidentWorker:
+    """One persistent inference process: one JSON task per stdin line, progress on stdout.
+
+    Stage lines update the current task; {"task_done": {"code": …, "error": …}}
+    ends it. If the process dies (CUDA crash), the reader hits EOF and the
+    waiting run() marks the task failed and respawns the worker.
+    """
+
+    def __init__(self, service):
+        self.service = service
+        self.log = open(RUNTIME / "firered-worker.log", "a")
+        env = dict(os.environ, PYTHONNOUSERSITE="1", TORCH_DEVICE_BACKEND_AUTOLOAD="0", HF_HUB_OFFLINE="1",
+                   CUDA_CACHE_PATH=str(RUNTIME / "cache/cuda"), TRITON_CACHE_DIR=str(RUNTIME / "cache/triton"),
+                   TORCHINDUCTOR_CACHE_DIR=str(RUNTIME / "cache/torchinductor"), TMPDIR=str(RUNTIME / "tmp"),
+                   PATH=str(RUNTIME / "ffmpeg/bin") + ":" + os.environ.get("PATH", ""),
+                   # torchcodec needs ffmpeg's libav*.so and the pip nvidia-npp libs at dlopen time.
+                   LD_LIBRARY_PATH=":".join(filter(None, [
+                       str(RUNTIME / "ffmpeg/lib"),
+                       str(FIRERED_ENV_PATH_LIB / "nvidia/npp/lib"),
+                       os.environ.get("LD_LIBRARY_PATH", ""),
+                   ])),
+                   FIRERED_CODE_DIR=str(FIRERED_CODE))
+        env.pop("PYTHONPATH", None)
+        env.pop("PYTHONHOME", None)
+        self.process = subprocess.Popen([str(FIRERED_PYTHON), str(ROOT / "services/firered-audio/worker.py"), "serve"],
+                                        env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log,
+                                        text=True, cwd=str(FIRERED_CODE))
+        self.task_id = None
+        self.outcome = None
+        self.done = threading.Event()
+        self.dead = False
+        threading.Thread(target=self._read, name="firered-reader", daemon=True).start()
+
+    def _read(self):
+        try:
+            for line in self.process.stdout:
+                try:
+                    message = json.loads(line)
+                except ValueError:
+                    continue
+                if "stage" in message and self.task_id:
+                    self.service.update(self.task_id, stage=message["stage"])
+                if "task_done" in message:
+                    self.outcome = message["task_done"]
+                    self.done.set()
+        except Exception:
+            logger.exception("FireRed worker reader failed")
+        finally:
+            self.dead = True
+            self.done.set()
+
+    def run_task(self, task_id, spec):
+        self.task_id = task_id
+        self.outcome = None
+        self.done.clear()
+        self.process.stdin.write(json.dumps(spec) + "\n")
+        self.process.stdin.flush()
+        self.done.wait()
+        return self.outcome
+
+
 class FireRedService:
     def __init__(self):
         self.lock = threading.RLock()
@@ -257,6 +318,7 @@ class FireRedService:
             return self.get(row["id"])
 
     def run(self):
+        worker = None
         while True:
             with self.wake:
                 task = self.next_task()
@@ -276,38 +338,25 @@ class FireRedService:
                 write_json(task_file, request.model_dump())
                 caps = {"understand": MAX_UNDERSTAND_MINUTES, "edit": MAX_EDIT_MINUTES, "edit_acoustic": MAX_EDIT_MINUTES,
                         "asr": MAX_UNDERSTAND_MINUTES, "tts": MAX_CLONE_REF_MINUTES}.get(request.type, 10)
-                env = dict(os.environ, PYTHONNOUSERSITE="1", TORCH_DEVICE_BACKEND_AUTOLOAD="0", HF_HUB_OFFLINE="1",
-                           CUDA_CACHE_PATH=str(RUNTIME / "cache/cuda"), TRITON_CACHE_DIR=str(RUNTIME / "cache/triton"),
-                           TORCHINDUCTOR_CACHE_DIR=str(RUNTIME / "cache/torchinductor"), TMPDIR=str(RUNTIME / "tmp"),
-                           PATH=str(RUNTIME / "ffmpeg/bin") + ":" + os.environ.get("PATH", ""),
-                           # torchcodec needs ffmpeg's libav*.so and the pip nvidia-npp libs at dlopen time.
-                           LD_LIBRARY_PATH=":".join(filter(None, [
-                               str(RUNTIME / "ffmpeg/lib"),
-                               str(FIRERED_ENV_PATH_LIB / "nvidia/npp/lib"),
-                               os.environ.get("LD_LIBRARY_PATH", ""),
-                           ])),
-                           FIRERED_CODE_DIR=str(FIRERED_CODE), FIRERED_MAX_MINUTES=str(caps))
-                env.pop("PYTHONPATH", None)
-                env.pop("PYTHONHOME", None)
-                command = [str(FIRERED_PYTHON), str(ROOT / "services/firered-audio/worker.py"), str(task_file), str(workdir)]
-                for name, path in inputs.items():
-                    value = [str(item) for item in path] if isinstance(path, list) else str(path)
-                    command += [f"--{name}", json.dumps(value)]
-                stderr = workdir / "worker.log"
-                with stderr.open("w") as log:
-                    process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=log, text=True, cwd=str(FIRERED_CODE))
-                    for line in process.stdout:
-                        try:
-                            stage = json.loads(line).get("stage")
-                        except ValueError:
-                            continue
-                        if stage:
-                            self.update(task_id, stage=stage)
-                    code = process.wait()
-                if code:
-                    detail = (stderr.read_text()[-2000:] if stderr.exists() else "") or "任务失败"
+                spec = {"task_file": str(task_file), "workdir": str(workdir), "max_minutes": caps}
+                if "primary" in inputs:
+                    spec["primary"] = str(inputs["primary"])
+                if "understand" in inputs:
+                    spec["understand"] = [str(item) for item in inputs["understand"]]
+                if worker is None or worker.dead:
+                    worker = ResidentWorker(self)
+                try:
+                    outcome = worker.run_task(task_id, spec)
+                except (BrokenPipeError, OSError):
+                    # The resident process died between tasks; restart it and retry once.
+                    worker = ResidentWorker(self)
+                    outcome = worker.run_task(task_id, spec)
+                if worker.dead or not outcome:
+                    raise RuntimeError("推理进程中断；请使用原参数重新生成")
+                if outcome.get("code"):
+                    detail = outcome.get("error") or "任务失败"
                     if "out of memory" in detail.lower():
-                        detail = "显存不足（32G 卡上生成类任务接近上限；请确认音乐服务已空闲后重试）\n" + detail[-600:]
+                        detail = "显存不足（生成类任务约需 21GB 显存）\n" + detail[-600:]
                     self.update(task_id, status="failed", stage="failed", error=detail)
                 else:
                     result = json.loads((workdir / "result.json").read_text(encoding="utf-8"))
@@ -315,6 +364,8 @@ class FireRedService:
             except Exception as exc:
                 logger.exception("FireRed task %s failed", task_id)
                 self.update(task_id, status="failed", stage="failed", error=str(exc))
+        if worker is not None and worker.process.poll() is None:
+            worker.process.terminate()
 
     def close(self):
         with self.wake:

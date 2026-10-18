@@ -6,10 +6,11 @@ description: Planned follow-up work
 # TODO
 
 - 第二台音频 GPU 后续按独立环境接入音效模型；本轮已接入 FireRedAudio 语音（TTS/编辑）与 ASR/音频理解。
-- FireRedAudio 生成类任务（TTS/编辑）在 32GB 5090 上显存贴上限：主模型 + RedAE 解码器共约 29.6GB 权重，首次部署后需实测是否 OOM；理解类任务（约 21.2GB）余量充足。5090（Blackwell sm_120）的 flash-attn 轮子与 uv 托管 Python 3.10 下载也需在部署机验证。
+- FireRedAudio 显存核算修正：生成类任务实际静态约 21.2GiB（主模型 BF16 19.8GiB + 解码器实际加载部分约 1.4GiB；旧「29.6GB」为文件体积相加的估算），声音设计冒烟已通过未 OOM；长音频编辑等重负载仍待实测。5090（Blackwell sm_120）的 flash-attn 轮子与 uv 托管 Python 3.10 下载也需在部署机验证。
+- 清理旧机持久卷上不再使用的 YuE2 资产：`/project/daixinliang/audio-studio/models` 下的 YuE2-3B（6.8G）、YuE2-Vae（0.5G）、MusicFlamingo（16G）、MERT-v2-FullSong（2.4G）、SheetSage2（0.2G）共约 26GB；待新机稳定运行、确认无需回退后由用户决定删除。
 - FireRedAudio 运行环境（firered-env + ffmpeg + 官方代码仓）与 Jupyter 转发插件（pip --user 安装，需重启 Jupyter 加载）未纳入恢复快照；容器重建后按 local-development 的「容器重建恢复」顺序重建，权重在持久卷不受影响。
 - 在需要部署音乐/语音节点到静态站点时补充 Docker/Nginx 的 YuE2 与 FireRedAudio 固定转发；当前仅本地 Vite 开发/预览已接入。
-- YuE2 参考分析环境纳入恢复快照：当前快照仅覆盖基础生成环境，尚未包含 SheetSage2/MERT、MusicFlamingo 的独立运行环境和 ffmpeg；容器重建后不能据此认为参考能力已经恢复。
+- YuE2 参考分析环境纳入恢复快照：当前快照仅覆盖基础生成环境，尚未包含 SheetSage2/MERT、MusicFlamingo 的独立运行环境和 ffmpeg；容器重建后不能据此认为参考能力已经恢复。音乐服务已迁往 4090 专用机（dep457-hzlipeng-music4090），重建后需在该机重跑 `deploy.sh` 与 `bootstrap-reference.py`。
 - 音乐时长控制：当前 YuE2 inference 0.1.5 没有原生 duration/seconds 参数，官方也不保证严格音频时长；已确认暂不提供时长控件，如后续官方支持再评估。
 
 - 修复原仓 v0.19.0 的缩略图取消处理：生成缩略图期间停止任务，应中止结果写回并清理原图、缩略图和内存 URL。

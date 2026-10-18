@@ -32,53 +32,55 @@ Common locations:
 
 ## 云端 YuE2 音乐环境
 
-音乐服务独立部署在第二台 RTX 5090，不影响原来的 ComfyUI 图片/视频环境。当前基础环境保留 Python 3.13.15、Node 24.20.0 和 CUDA 13.0；YuE2 单独使用 `/var/tmp/audio-studio/env`，固定 PyTorch 2.10.0+cu130、Transformers 4.57.6 和官方 inference 0.1.5，以符合模型依赖。完整 BF16 主模型与 FP32 官方默认 VAE 不做量化或蒸馏。
+音乐服务部署在专用 RTX 4090 机器 `dep457-hzlipeng-music4090`（24GB 显存，2026-10-14 由第二台 5090 迁入），与 ComfyUI、FireRedAudio 所在机器互不影响。机器驱动 570.169（最高 CUDA 12.8，不支持 cu130 wheel），系统 Python 仅 3.10，Python 3.13 由 uv 安装在 `~/.local/share/uv/python`；YuE2 单独使用 `/var/tmp/audio-studio/env`，固定 PyTorch 2.10.0+cu128、Transformers 4.57.6 和官方 inference 0.1.5。完整 BF16 主模型与 FP32 官方默认 VAE 不做量化或蒸馏；生成期实测约 8.6GB 显存，任务结束后管线常驻进程内存，仅留约 1GB CUDA 上下文。
 
 | 云端路径 | 用途 |
 | --- | --- |
-| `/project/daixinliang/audio-studio/services/yue2` | 服务源码与安装、启动、恢复脚本 |
-| `/project/daixinliang/audio-studio/models` | 固定版本的完整 YuE2-3B 和 YuE2-Vae，保留官方 SHA256 清单 |
-| `/project/daixinliang/audio-studio/outputs` | WAV/FLAC 与生成 ABC 乐谱 |
-| `/project/daixinliang/audio-studio/jobs/yue2.sqlite3` | 原始请求、实际种子、任务阶段与结果 |
-| `/project/daixinliang/audio-studio/recover` | 依赖清单、受限权限 token 与恢复快照 |
-| `/var/tmp/audio-studio` | 快速运行环境、临时文件、下载/编译缓存与日志，容器重建可能丢失 |
+| `/home/hzlipeng/audio-studio/services/yue2` | 服务源码与安装、启动、恢复脚本 |
+| `/home/hzlipeng/audio-studio/models` | 固定版本的完整 YuE2-3B 和 YuE2-Vae，保留官方 SHA256 清单 |
+| `/home/hzlipeng/audio-studio/outputs` | WAV/FLAC 与生成 ABC 乐谱 |
+| `/home/hzlipeng/audio-studio/jobs/yue2.sqlite3` | 原始请求、实际种子、任务阶段与结果 |
+| `/home/hzlipeng/audio-studio/recover` | 依赖清单、受限权限 token 与恢复快照 |
+| `/var/tmp/audio-studio` | 快速运行环境、临时文件、下载/编译缓存与日志，容器重建会丢失 |
 
-源码位于仓库 `services/yue2/`。在同类云端机器上确认 Python、GPU、持久卷权限与剩余空间后，将该目录放到持久卷，再运行 `bash deploy.sh`。它只安装独立环境，不替换已有 Python、Node、Jupyter 或宿主驱动。当前网络需要镜像时可设置 `HF_ENDPOINT=https://hf-mirror.com`、`PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple` 和 `YUE2_TORCH_URL` 为同版本 wheel 的镜像地址；Torch 与主模型文件仍按固定 SHA256 校验。大模型在本地盘下载，再单流写入持久卷并延迟重新核验，避免 CubeFS 大文件截断。
+`/home/hzlipeng` 是挂载在该机的 cubefs 持久卷（此机没有 `/project`），权重与任务记录放在这里，容器重建不丢；`/var/tmp` 及运行环境会随容器重建清空。
 
-服务在云端 `127.0.0.1:8190` 监听，通过 Jupyter 的 `/proxy/8190` 访问。手动启动使用 `setsid bash /project/daixinliang/audio-studio/services/yue2/start.sh </dev/null >>/var/tmp/audio-studio/api.log 2>&1 &`，不依赖 Notebook 内核。`GET /health` 查看就绪情况；生成与下载接口必须提供 Bearer token。
+源码位于仓库 `services/yue2/`。新机部署时把该目录放到 `/home/hzlipeng/audio-studio/services/yue2`，先准备 Python 3.13（`pip install --user uv` 后 `uv python install 3.13`），再用环境变量 `AUDIO_STUDIO_ROOT=/home/hzlipeng/audio-studio`、`YUE2_BASE_PYTHON`（uv 托管 3.13 路径）运行 `bash deploy.sh`。驱动 570 需用 cu128 wheel：设置 `YUE2_TORCH_URL=https://mirror.nju.edu.cn/pytorch/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313-manylinux_2_28_x86_64.whl` 并配 `YUE2_TORCH_SHA256`；镜像源设 `HF_ENDPOINT=https://hf-mirror.com`、`PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`。Torch 与主模型文件仍按固定 SHA256 校验；大模型在本地盘下载，再单流写入持久卷并延迟重新核验，避免 CubeFS 大文件截断。
+
+服务在云端 `127.0.0.1:8190` 监听，通过 Jupyter 的 `/proxy/8190` 访问（需 `pip install --user jupyter-server-proxy` 并重启 Jupyter 加载）。手动启动使用 `setsid bash /home/hzlipeng/audio-studio/services/yue2/start.sh </dev/null >>/var/tmp/audio-studio/api.log 2>&1 &`，不依赖 Notebook 内核。`GET /health` 查看就绪情况；生成与下载接口必须提供 Bearer token。
 
 本地 `web/.env.local` 的 `YUE2_REMOTE_URL` 仅保存固定目标地址；token 放在被 Git 忽略的 `data/yue2-api.token`（文件权限 `0600`），或由运行 Vite 的进程传入 `YUE2_API_TOKEN`。Vite 的 `/yue2` 转发仅接受本机画布请求，并在服务端注入 token，不把云端密钥发给浏览器。当前已接入本地 Vite 开发/预览，Docker/Nginx 转发尚未实现。画布项目和音频副本仍保存在浏览器本地，不代表云同步。
 
-音乐 API 使用 `POST /v1/music/generations` 提交，`GET /v1/music/generations/{id}` 查询，`/content` 下载音频，`/score` 读取生成乐谱。客户端 UUID 与原始参数绑定，相同请求不会重复生成；随机种子在首次入队时确定，查询结果中的实际种子不会改写原请求的 `seed: null`。同一时刻生成一首，其余任务持久排队；不自动重试生成，不按条数静默删除历史。模型/服务中断后，已运行任务报中断失败，未运行任务保留；前端停止查询不会停止 GPU 生成。
+音乐 API 使用 `POST /v1/music/generations` 提交，`GET /v1/music/generations/{id}` 查询，`/content` 下载音频，`/score` 读取生成乐谱。客户端 UUID 与原始参数绑定，相同请求不会重复生成；随机种子在首次入队时确定，查询结果中的实际种子不会改写原请求的 `seed: null`。同一时刻生成一首，其余任务持久排队；模型在服务生命周期内常驻：首个任务付一次性 SHA 校验与加载（约 40 秒），之后每个任务只需把上一任务解码时卸载到内存的权重回传 GPU（约 1 秒）。不自动重试生成，不按条数静默删除历史。模型/服务中断后，已运行任务报中断失败，未运行任务保留；前端停止查询不会停止 GPU 生成。
 
-参考音频接口为 `POST /v1/music/audio` 上传、`POST /v1/music/analyses` 提交转谱／曲风／歌词分析、`GET /v1/music/analyses/{id}` 查询；生成通过 `reference.analysis_id` 引用完成结果。SheetSage2 + MERT 将音频转为 ABC，MusicFlamingo 提取曲风文字和歌词，已有音乐优先复用原生成乐谱。YuE2 使用乐谱和风格文字重新创作，不直接接收参考波形，不承诺声线克隆或完整原编曲。`deploy.sh` 会复制已有参考源码，但基础部署不自动安装参考环境；需要参考能力时，在确认依赖与资源后用基础 Python 3.13 执行 `bootstrap-reference.py`，分别创建 `sheetsage-env`、`flamingo-env` 和 ffmpeg 环境。`/health` 的参考能力标记不是实际转谱／生成成功的证明。
+参考音频接口为 `POST /v1/music/audio` 上传、`POST /v1/music/analyses` 提交转谱／曲风／歌词分析、`GET /v1/music/analyses/{id}` 查询；生成通过 `reference.analysis_id` 引用完成结果。SheetSage2 + MERT 将音频转为 ABC，MusicFlamingo 提取曲风文字和歌词，已有音乐优先复用原生成乐谱。YuE2 使用乐谱和风格文字重新创作，不直接接收参考波形，不承诺声线克隆或完整原编曲。`deploy.sh` 会复制已有参考源码，但基础部署不自动安装参考环境；需要参考能力时用 Python 3.13 执行 `bootstrap-reference.py`（需 `uv` 在 PATH），创建 `sheetsage-env`（uv 托管 Python 3.11 + torch 2.8.0+cu128）与 `flamingo-env`（复用主服务下载的 cu128 torch wheel，文件名经 `YUE2_TORCH_URL` 推导）。新机直接复用系统 `/usr/bin/ffmpeg`（软链到 `$RUNTIME/ffmpeg/bin`），不再单独安装 ffmpeg。`/health` 的参考能力标记不是实际转谱／生成成功的证明。
 
 纯音乐走 `output_type: "instrumental"`：服务先按歌曲链路解析参考并强制空歌词、附加 Instrumental 风格前缀，规划一次乐谱后调用 `services/yue2/instrumental/` 的官方转谱工具（固定 revision `1647252d` 的 MIT 脚本，标准库实现，仅 Vocal 旋律转移到器乐声部、Vocal 保留休止与和弦）重建固定谱前缀，再一次性生成音频；转换或谱面校验失败任务直接失败并保留原始乐谱，不降级为带人声生成。任务输出目录保留 `source-score.abc`、`conversion/` 与最终 `score.abc`，`GET /score?variant=used|source` 分别下载最终谱与原始谱。乐谱无人声音符不等于音频听感无人声，成品仍需人工听验；模型没有原生时长参数。该能力需重新部署 `services/yue2` 后在远端生效。
 
-恢复资料已包含独立推理环境及其依赖的基础 Python、Node、CUDA，但当前快照不包含参考分析的独立环境、Python 3.11 和 ffmpeg。`bash recover.sh snapshot` 创建快照，已有快照时拒绝覆盖；`bash recover.sh restore` 先校验 SHA256，并在任何目标运行目录已存在时拒绝覆盖。尚未模拟整个容器重建，恢复后的实际服务启动仍需验收。
+容器重建会清空 `/var/tmp`（运行环境、参考环境与下载缓存），但 `/home/hzlipeng` 持久卷上的权重、任务记录与 token、`~/.local` 里的 uv Python 与 jupyter-server-proxy 都保留。恢复顺序：重跑 `deploy.sh` 重建主环境并拉起 8190，再按需重跑 `bootstrap-reference.py` 重建参考环境；`/proxy` 插件失效时重装并重启 Jupyter。`bash recover.sh snapshot` 创建快照，已有快照时拒绝覆盖；`bash recover.sh restore` 先校验 SHA256，并在任何目标运行目录已存在时拒绝覆盖。尚未模拟整个容器重建，恢复后的实际服务启动仍需验收。
 
-已用完整默认模型生成一首原创短样例，得到 37.479 秒、48kHz 双声道 FLOAT32 WAV 和 ABC 乐谱；重复 UUID 保持一条任务记录，参数冲突返回 409。该结果只证明这次链路可用，不代表完整长歌、其他规划模式或高级参数效果已验收。权重使用 CC BY-NC 4.0，模型许可与本项目代码许可独立。
+已用完整默认模型生成一首原创短样例，得到 37.479 秒、48kHz 双声道 FLOAT32 WAV 和 ABC 乐谱；重复 UUID 保持一条任务记录，参数冲突返回 409。2026-10-14 迁机冒烟：同参数连续两首生成，首任务 60 秒（含一次性校验与 14.3 秒加载，出 39 秒歌曲），第二任务 25 秒（常驻权重回传仅 0.8 秒，出 51 秒歌曲），外网经 `/proxy/8190` 验证 health 200、无 token 401。该结果只证明这次链路可用，不代表完整长歌、其他规划模式或高级参数效果已验收。权重使用 CC BY-NC 4.0，模型许可与本项目代码许可独立。
 
 ## 云端 FireRedAudio 语音环境
 
-FireRedAudio（FireRed 团队统一音频大模型，9B 骨干 + Whisper-large-v3 编码器 + RedAE 流匹配解码器，约 10.6B，Apache-2.0）与 YuE2 同机部署在第二台 RTX 5090：FireRed 服务监听 `127.0.0.1:8191`，YuE2 仍在 8190。显存错峰策略：FireRed 每个任务由 `api.py` 起独立 `worker.py` 子进程加载模型、完成即退出释放显存；YuE2 已改为按任务加载并在任务结束或参考分析前卸载管线。两服务任务各自串行排队，同一时刻只有一个模型占用 GPU。
+FireRedAudio（FireRed 团队统一音频大模型，9B 骨干 + Whisper-large-v3 编码器 + RedAE 流匹配解码器，约 10.6B，Apache-2.0）独占第二台 RTX 5090（`dep457-daixinliang-generate`）：YuE2 音乐服务已于 2026-10-14 迁往专用 4090 机器，本机 8190 不再运行，FireRed 服务监听 `127.0.0.1:8191`，可使用整卡显存。常驻推理：`api.py` 启动一个常驻 `worker.py serve` 子进程，经 stdin 逐行下发任务、stdout 回报阶段与结果；首个任务加载一次主模型 + RedAE 解码器（约 21.2GiB），后续任务直接复用，不再每任务重载几十秒。连续 `FIRERED_IDLE_UNLOAD_SECONDS`（默认 1800 秒，设 0 关闭）没有任务时自动释放显存，下一个任务重新加载。推理进程崩溃时运行中任务报「推理进程中断；请使用原参数重新生成」，后续任务自动拉起新 worker 继续；任务仍在服务内串行排队。
 
 | 云端路径 | 用途 |
 | --- | --- |
 | `/project/daixinliang/audio-studio/services/firered-audio` | 服务源码（api.py / worker.py / bootstrap.py / deploy.sh / start.sh） |
 | `/project/daixinliang/audio-studio/models/FireRedAudio` | 主模型权重（约 21.2GB，ModelScope 下载） |
-| `/project/daixinliang/audio-studio/models/RedAE_decoder/model.pt` | 生成类任务的 RedAE 解码器（约 8.4GB） |
+| `/project/daixinliang/audio-studio/models/RedAE_decoder/model.pt` | 生成类任务的 RedAE 解码器 checkpoint（约 8.4GB，实际仅加载其中 decoder.* 约 1.4GB） |
 | `/project/daixinliang/audio-studio/jobs/firered.sqlite3` | 任务记录（服务中断后可按编号恢复） |
 | `/project/daixinliang/audio-studio/outputs/firered` | 每任务工作目录：输入转码、音频成品与 worker 日志 |
 | `/var/tmp/audio-studio/firered-env` | uv 管理的 Python 3.10 + cu128 独立环境 |
 | `/var/tmp/audio-studio/firered/FireRedAudio` | 官方代码仓浅克隆（inference.py / fireredaudio 包） |
 
-源码位于仓库 `services/firered-audio/`，在音乐机持久卷上执行 `bash deploy.sh` 即完成安装与启动（幂等，2026-10-13 已部署）。实际安装要点（均已固化在 `bootstrap.py`/`api.py`）：uv 托管 Python 3.10；官方代码仓 `uv sync --extra accel --group tools`，**跳过 `accel-build`**（本机 nvcc 为 CUDA 13.0 而官方锁 cu128，causal-conv1d/flash-attn 源码编译版本不匹配；flash-linear-attention 走纯 PyTorch 回退，推理可用）；另装 `fastapi`、`uvicorn`、`nvidia-npp-cu12`（torchcodec dlopen 需要 libnppicc.so.12）与 `modelscope`（下载权重用其 CLI 入口，`python -m modelscope` 不可用）。worker 子进程环境由 api.py 注入 `LD_LIBRARY_PATH`（`$RUNTIME/ffmpeg/lib` 提供 libav、nvidia/npp/lib 提供 NPP），PATH 前置 `ffmpeg/bin`。部署后需重启 `services/yue2`（懒加载改动）。手动启动：`setsid bash /project/daixinliang/audio-studio/services/firered-audio/start.sh </dev/null >>/var/tmp/audio-studio/firered-api.log 2>&1 &`。
+源码位于仓库 `services/firered-audio/`，在音乐机持久卷上执行 `bash deploy.sh` 即完成安装与启动（幂等，2026-10-13 已部署）。实际安装要点（均已固化在 `bootstrap.py`/`api.py`）：uv 托管 Python 3.10；官方代码仓 `uv sync --extra accel --group tools`，**跳过 `accel-build`**（本机 nvcc 为 CUDA 13.0 而官方锁 cu128，causal-conv1d/flash-attn 源码编译版本不匹配；flash-linear-attention 走纯 PyTorch 回退，推理可用）；另装 `fastapi`、`uvicorn`、`nvidia-npp-cu12`（torchcodec dlopen 需要 libnppicc.so.12）与 `modelscope`（下载权重用其 CLI 入口，`python -m modelscope` 不可用）。worker 子进程环境由 api.py 注入 `LD_LIBRARY_PATH`（`$RUNTIME/ffmpeg/lib` 提供 libav、nvidia/npp/lib 提供 NPP），PATH 前置 `ffmpeg/bin`。手动启动：`setsid bash /project/daixinliang/audio-studio/services/firered-audio/start.sh </dev/null >>/var/tmp/audio-studio/firered-api.log 2>&1 &`。
 
 本地 `web/.env.local` 配置 `FIRERED_REMOTE_URL`（Jupyter `/proxy/8191` 地址）；token 在云端 `recover/firered-api.token`，复制到本地被 Git 忽略的 `data/firered-api.token`，或由 Vite 进程环境变量 `FIRERED_API_TOKEN` 提供。Vite `/firered` 代理仅接受本机画布请求并服务端注入 token。
 
 API：`POST /v1/firered/audio` 原始音频上传（sha256 去重，浏览器端不转码，服务端 ffmpeg 统一转 24kHz 单声道 WAV）；`POST /v1/firered/tasks` 提交任务（`tts` 克隆/声音设计、`edit` 语义编辑、`edit_acoustic` 固定模板声学编辑、`asr` 转写、`understand` 音频问答，UUID 与参数绑定，重复提交幂等）；`GET /v1/firered/tasks/{id}` 轮询阶段；`/content` 分块下载 WAV。输入时长上限默认：理解 10 分钟、编辑 30 分钟、克隆参考 2 分钟（`FIRERED_MAX_UNDERSTAND_MINUTES` 等环境变量可调）。克隆模式未填参考转写时，worker 先用同一模型 ASR 自动识别参考音频再合成。
 
-显存提示：生成类任务（tts/edit/edit_acoustic/voice_design）需同时加载主模型与解码器共约 29.6GB，32GB 卡接近上限，是否稳定待实测；理解类任务仅约 21.2GB。
+显存提示：生成类任务（tts/edit/edit_acoustic/voice_design）实际加载主模型 BF16 权重（10.6B 参数 ≈ 19.8GiB）加解码器实际加载部分（≈ 1.4GiB），静态约 21.2GiB；此前「共约 29.6GB」是两个文件体积相加的估算，checkpoint 中的 encoder/semantic_proj 不会加载。理解类任务仅约 19.8GiB。声音设计已在 32GB 卡真实冒烟通过未 OOM，任务结束显存归零；长音频编辑等重负载仍待实测。
 
-容器重建恢复：重建会清空 `/var/tmp`（firered-env、ffmpeg 等运行环境）并可能丢失 Jupyter 端口转发插件，但 `/project` 持久卷上的权重、任务记录与 `~/.local` 用户包保留。恢复顺序：先用系统 Python 建 `$RUNTIME/tools` venv 装 uv，重跑 `deploy.sh` 重建 firered-env 与代码仓；ffmpeg 用 micromamba 装到 `$RUNTIME/ffmpeg`（老 conda 4.5 因 lsb_release 损坏不可用）；`pip install --user jupyter-server-proxy` 后需重启 Jupyter 才会加载 `/proxy` 转发；最后 `setsid` 拉起 8191 服务。音乐机控制台经 `~/jexec-venv/bin/python /tmp/jexec-music.py "命令"` 执行。官方声明零样本声音克隆仅限学术研究用途，勿用于仿冒他人声音等场景。
+容器重建恢复：重建会清空 `/var/tmp`（firered-env、ffmpeg 等运行环境）并可能丢失 Jupyter 端口转发插件，但 `/project` 持久卷上的权重、任务记录与 `~/.local` 用户包保留。恢复顺序：先用系统 Python 建 `$RUNTIME/tools` venv 装 uv，重跑 `deploy.sh` 重建 firered-env 与代码仓；ffmpeg 用 micromamba 装到 `$RUNTIME/ffmpeg`（老 conda 4.5 因 lsb_release 损坏不可用）；`pip install --user jupyter-server-proxy` 后需重启 Jupyter 才会加载 `/proxy` 转发；最后 `setsid` 拉起 8191 服务。本机（dep457-daixinliang-generate）控制台经 `~/jexec-venv/bin/python /tmp/jexec-music.py "命令"` 执行。官方声明零样本声音克隆仅限学术研究用途，勿用于仿冒他人声音等场景。

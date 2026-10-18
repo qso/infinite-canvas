@@ -375,8 +375,11 @@ class MusicService:
             import soundfile as sf
             from yue2 import YuE2Pipeline
 
-            # Lazy load: FireRedAudio shares this GPU and needs the full card for its
-            # generation tasks, so the pipeline is loaded per job and unloaded after it.
+            # This service owns its GPU: the pipeline is loaded on the first job and
+            # stays resident across jobs and reference analyses. A job's VAE decode
+            # offloads the weights to CPU, so the next job only pays a fast .to(cuda);
+            # the 40s integrity-check and disk reload happen once per service
+            # lifetime, not per job.
             self.state = "ready"
             while True:
                 with self.wake:
@@ -392,9 +395,6 @@ class MusicService:
                     if self.stop.is_set():
                         break
                 if analysis:
-                    if pipe is not None:
-                        pipe.close()
-                        pipe = None
                     try:
                         self.run_analysis(analysis)
                     except Exception as exc:
@@ -495,9 +495,6 @@ class MusicService:
                     self.update(job_id, status="failed", stage="failed", error=str(exc))
                 finally:
                     plan = semantic = latents = audio = None
-                    if pipe is not None:
-                        pipe.close()
-                        pipe = None
         except Exception as exc:
             logger.exception("YuE2 worker failed")
             with self.lock:
