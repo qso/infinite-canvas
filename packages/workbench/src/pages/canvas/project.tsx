@@ -41,6 +41,7 @@ import { readMediaBlob } from "@workbench/services/file-storage";
 import { readVideoPlayhead } from "@workbench/components/media-player";
 import type { CanvasDocumentOp } from "@infinite-canvas/shared/canvas/ops/apply";
 import { FIRERED_ACOUSTIC_LIMITS } from "@workbench/constant/firered";
+import { registerMusicAgentTool } from "@workbench/lib/agent/music-tool";
 import { useAgentBridge } from "@workbench/pages/canvas/hooks/use-agent-bridge";
 import { createNodePanelSelection, usePluginHost, type OpenNodePanel } from "@workbench/pages/canvas/hooks/use-plugin-host";
 import { useNodeGeneration } from "@workbench/pages/canvas/hooks/use-node-generation";
@@ -224,6 +225,7 @@ function InfiniteCanvasPage({ project, session }: { project: CanvasProject; sess
     }), [session]);
     useLayoutEffect(() => registerCanvasNodeMenus(session), [session]);
     useLayoutEffect(() => registerCanvasNodeCreation(session), [session]);
+    useLayoutEffect(() => registerMusicAgentTool(session), [session]);
     useLayoutEffect(() => registerCanvasClipboard(session, (available) => { hasCanvasClipboard.current = available; }), [session]);
     useLayoutEffect(() => session.on("document.committed", () => {
         const currentSnapshot = session.getSnapshot();
