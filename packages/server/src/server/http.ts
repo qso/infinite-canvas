@@ -17,6 +17,7 @@ import { AGENT_PROTOCOL_VERSION, CanvasSession } from "../canvas/session.js";
 import { type ServerConfig } from "../config.js";
 import { logger } from "../utils/logger.js";
 import { createCanvasMcpServer } from "./mcp.js";
+import { mountPrivateProxies } from "./private-proxies.js";
 import { canvasToolError } from "@infinite-canvas/shared/canvas/tools/errors";
 
 export function createCanvasHttpApp(config: ServerConfig, session: CanvasSession, options?: { storage: FsStorage; tasks?: ModelTasks; web?: RequestHandler; plugins?: PluginManager }) {
@@ -42,6 +43,7 @@ export function createCanvasHttpApp(config: ServerConfig, session: CanvasSession
     });
     if (options) mountStorage(app, options.storage);
     if (options) mountNetwork(app);
+    mountPrivateProxies(app);
     app.use(["/api/models", "/api/channels", "/api/workspace-config"], express.json({ limit: Infinity }));
     app.use(express.json({ limit: "30mb" }));
     if (options?.plugins) mountPlugins(app, options.plugins);
