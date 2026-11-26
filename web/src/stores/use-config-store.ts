@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
 import { H3_DEFAULT_STEPS, isMiniMaxH3, isQwenImage21, MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION, QWEN_IMAGE_21_DEFAULT_STEPS, QWEN_IMAGE_21_OPTION } from "@/constant/comfyui";
+import { DREAMMAKER_IMAGE_OPTIONS, DREAMMAKER_VIDEO_OPTIONS, dreamMakerModelLabel, isDreamMakerImage, isDreamMakerModel, isDreamMakerVideo } from "@/constant/dreammaker";
 import { FIRERED_SPEECH_OPTION, FIRERED_UNDERSTAND_OPTION, isFireRedModel, isFireRedSpeech, isFireRedUnderstand } from "@/constant/firered";
 
 export type ApiCallFormat = "openai" | "gemini";
@@ -61,6 +62,22 @@ export type AiConfig = {
     imageSeed: string;
     imageNegative: string;
     imageResolution: string;
+    dmMjQuality: string;
+    dmMjHd: string;
+    dmMjRaw: string;
+    dmMjStylize: string;
+    dmMjChaos: string;
+    dmMjWeird: string;
+    dmMjExp: string;
+    dmMjTile: string;
+    dmMjIw: string;
+    dmMjMode: string;
+    dmGptFormat: string;
+    dmGptModeration: string;
+    dmArkSizeTier: string;
+    dmArkOptimizePrompt: string;
+    dmArkWebSearch: string;
+    dmArkLayerDecomposition: string;
     count: string;
     canvasImageCount: string;
     proxyEnabled: boolean;
@@ -139,6 +156,22 @@ export const defaultConfig: AiConfig = {
     imageSeed: "",
     imageNegative: "",
     imageResolution: "1024",
+    dmMjQuality: "4",
+    dmMjHd: "false",
+    dmMjRaw: "false",
+    dmMjStylize: "100",
+    dmMjChaos: "0",
+    dmMjWeird: "0",
+    dmMjExp: "0",
+    dmMjTile: "false",
+    dmMjIw: "1",
+    dmMjMode: "fast",
+    dmGptFormat: "png",
+    dmGptModeration: "auto",
+    dmArkSizeTier: "2K",
+    dmArkOptimizePrompt: "",
+    dmArkWebSearch: "false",
+    dmArkLayerDecomposition: "false",
     count: "1",
     canvasImageCount: "3",
     proxyEnabled: false,
@@ -180,6 +213,8 @@ const IMAGE_KEYWORDS = ["seedream", "gpt-image", "image", "dall-e", "dalle", "im
 
 /** Best-effort default capability for a freshly fetched model name; user can override in the channel editor. */
 export function guessCapability(name: string): ModelCapability {
+    if (isDreamMakerVideo(name)) return "video";
+    if (isDreamMakerImage(name)) return "image";
     if (isMiniMaxH3(name)) return "video";
     if (isQwenImage21(name)) return "image";
     if (isFireRedUnderstand(name)) return "text";
@@ -200,6 +235,8 @@ function findChannelModel(config: AiConfig, value: string): { channel: ModelChan
 }
 
 export function modelCapabilityOf(config: AiConfig, value: string): ModelCapability | undefined {
+    if (isDreamMakerVideo(value)) return "video";
+    if (isDreamMakerImage(value)) return "image";
     if (isMiniMaxH3(value)) return "video";
     if (isQwenImage21(value)) return "image";
     if (isFireRedUnderstand(value)) return "text";
@@ -227,7 +264,12 @@ export function resolveModelForCapability(config: AiConfig, currentModel: string
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
     const models = capability ? config.channels.flatMap((channel) => channel.models.filter((model) => model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name))) : config.models;
-    const builtin = [...(!capability || capability === "video" ? [MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION] : []), ...(capability === "image" ? [QWEN_IMAGE_21_OPTION] : []), ...(capability === "audio" ? [FIRERED_SPEECH_OPTION] : []), ...(capability === "text" ? [FIRERED_UNDERSTAND_OPTION] : [])];
+    const builtin = [
+        ...(!capability || capability === "video" ? [MINIMAX_H3_FAST_OPTION, MINIMAX_H3_OPTION, ...DREAMMAKER_VIDEO_OPTIONS] : []),
+        ...(!capability || capability === "image" ? [QWEN_IMAGE_21_OPTION, ...DREAMMAKER_IMAGE_OPTIONS] : []),
+        ...(capability === "audio" ? [FIRERED_SPEECH_OPTION] : []),
+        ...(capability === "text" ? [FIRERED_UNDERSTAND_OPTION] : []),
+    ];
     return Array.from(new Set([...builtin, ...models]));
 }
 
@@ -237,9 +279,10 @@ export function resolveModelScript(config: AiConfig, value: string) {
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
-    if (isMiniMaxH3(model) || isQwenImage21(model) || isFireRedModel(model)) return true;
+    if (isMiniMaxH3(model) || isQwenImage21(model) || isFireRedModel(model) || isDreamMakerModel(model)) return true;
     const match = findChannelModel(config, model);
-    return Boolean(match && match.channel.baseUrl.trim() && match.channel.apiKey.trim());}
+    return Boolean(match && match.channel.baseUrl.trim() && match.channel.apiKey.trim());
+}
 
 export const useConfigStore = create<ConfigStore>()(
     persist(
@@ -307,12 +350,28 @@ export const useConfigStore = create<ConfigStore>()(
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
-                        videoMode: config.videoMode === "reference" || config.videoMode === "text" ? config.videoMode : "frames",
+                        videoMode: config.videoMode === "reference" || config.videoMode === "text" || config.videoMode === "edit" || config.videoMode === "extend" ? config.videoMode : "frames",
                         imageSteps: config.imageSteps || String(QWEN_IMAGE_21_DEFAULT_STEPS),
                         imageCfg: config.imageCfg || "1",
                         imageSeed: config.imageSeed || "",
                         imageNegative: config.imageNegative || "",
                         imageResolution: config.imageResolution || "1024",
+                        dmMjQuality: config.dmMjQuality || "4",
+                        dmMjHd: config.dmMjHd || "false",
+                        dmMjRaw: config.dmMjRaw || "false",
+                        dmMjStylize: config.dmMjStylize || "100",
+                        dmMjChaos: config.dmMjChaos || "0",
+                        dmMjWeird: config.dmMjWeird || "0",
+                        dmMjExp: config.dmMjExp || "0",
+                        dmMjTile: config.dmMjTile || "false",
+                        dmMjIw: config.dmMjIw || "1",
+                        dmMjMode: config.dmMjMode || "fast",
+                        dmGptFormat: config.dmGptFormat || "png",
+                        dmGptModeration: config.dmGptModeration || "auto",
+                        dmArkSizeTier: config.dmArkSizeTier || "2K",
+                        dmArkOptimizePrompt: config.dmArkOptimizePrompt || "",
+                        dmArkWebSearch: config.dmArkWebSearch || "false",
+                        dmArkLayerDecomposition: config.dmArkLayerDecomposition || "false",
                         canvasImageCount: config.canvasImageCount || "3",
                         proxyEnabled: Boolean(config.proxyEnabled),
                         proxyUrl: config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,
@@ -447,6 +506,8 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     if (value === QWEN_IMAGE_21_OPTION) return "Qwen Image 2.1（云端 ComfyUI）";
     if (value === FIRERED_SPEECH_OPTION) return "FireRedAudio 语音（云端 5090）";
     if (value === FIRERED_UNDERSTAND_OPTION) return "FireRedAudio 识别与理解（云端 5090）";
+    const dreamMakerLabel = dreamMakerModelLabel(value);
+    if (dreamMakerLabel) return dreamMakerLabel;
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
@@ -460,7 +521,7 @@ export function modelOptionsFromChannels(channels: ModelChannel[]) {
 export function normalizeModelOptionValue(value: string | undefined, channels: ModelChannel[]) {
     const model = (value || "").trim();
     if (!model) return "";
-    if (model === MINIMAX_H3_OPTION || model === MINIMAX_H3_FAST_OPTION || model === QWEN_IMAGE_21_OPTION || isFireRedModel(model)) return model;
+    if (model === MINIMAX_H3_OPTION || model === MINIMAX_H3_FAST_OPTION || model === QWEN_IMAGE_21_OPTION || isFireRedModel(model) || isDreamMakerModel(model)) return model;
     const decoded = decodeChannelModel(model);
     if (decoded) {
         const channel = channels.find((item) => item.id === decoded.channelId);

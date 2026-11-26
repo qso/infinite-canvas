@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, Upload, WandSparkles } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
@@ -10,8 +10,10 @@ import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { isDreamMakerMj } from "@/constant/dreammaker";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { getPromptOptimizeSpec, optimizeModelPrompt } from "@/lib/prompt-optimizer";
+import { modelOptionLabel, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
@@ -95,6 +97,9 @@ export default function ImagePage() {
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [isReferenceDragActive, setIsReferenceDragActive] = useState(false);
     const [autoRunToken, setAutoRunToken] = useState(0);
+    const [optimizing, setOptimizing] = useState(false);
+    const [promptBeforeOptimize, setPromptBeforeOptimize] = useState<string | null>(null);
+    const optimizeControllerRef = useRef<AbortController | null>(null);
     const imageCommand = useWorkbenchAgentStore((state) => state.imageCommand);
     const clearImageCommand = useWorkbenchAgentStore((state) => state.clearImageCommand);
     const updateAgentTask = useWorkbenchAgentStore((state) => state.updateTask);
@@ -103,7 +108,63 @@ export default function ImagePage() {
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
-    const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
+    const isMjModel = isDreamMakerMj(model);
+    const rawGenerationCount = Math.max(1, Math.min(12, Number(config.count) || 1));
+    const generationCount = isMjModel ? Math.max(4, Math.min(12, Math.ceil(rawGenerationCount / 4) * 4)) : Math.min(10, rawGenerationCount);
+    const optimizeSpec = getPromptOptimizeSpec({
+        mode: "image",
+        model,
+        config: { ...effectiveConfig, model },
+        imageCount: references.length,
+        videoCount: 0,
+        audioCount: 0,
+    });
+
+    const handleOptimizePrompt = async () => {
+        if (optimizing) {
+            optimizeControllerRef.current?.abort();
+            setOptimizing(false);
+            return;
+        }
+        const draft = prompt.trim();
+        if (!draft) {
+            message.warning(t("imageWorkbench.promptRequired"));
+            return;
+        }
+        const textModel = resolveModelForCapability(effectiveConfig, effectiveConfig.textModel, "text");
+        if (!isAiConfigReady(effectiveConfig, textModel)) {
+            message.warning("请先在设置中配置文本模型（用于提示词优化）");
+            openConfigDialog(true);
+            return;
+        }
+        const controller = new AbortController();
+        optimizeControllerRef.current = controller;
+        setPromptBeforeOptimize(prompt);
+        setOptimizing(true);
+        try {
+            const optimized = await optimizeModelPrompt(
+                { ...effectiveConfig, textModel },
+                draft,
+                { mode: "image", model, config: { ...effectiveConfig, model }, imageCount: references.length, videoCount: 0, audioCount: 0 },
+                (partial) => {
+                    if (!controller.signal.aborted && partial.trim()) setPrompt(partial);
+                },
+                controller.signal,
+            );
+            if (!controller.signal.aborted && optimized) {
+                setPrompt(optimized);
+                message.success(`已按${optimizeSpec.specLabel}优化提示词`);
+            }
+        } catch (error) {
+            if (!(error instanceof DOMException && error.name === "AbortError")) {
+                message.error(error instanceof Error ? error.message : "提示词优化失败");
+                setPromptBeforeOptimize(null);
+            }
+        } finally {
+            if (optimizeControllerRef.current === controller) optimizeControllerRef.current = null;
+            setOptimizing(false);
+        }
+    };
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -177,10 +238,12 @@ export default function ImagePage() {
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
 
-        const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
+        const tasks = isMjModel
+            ? Array.from({ length: generationCount / 4 }, (_, batchIndex) => runMjBatchSlots(batchIndex * 4, snapshot))
+            : Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
 
         const result = await Promise.allSettled(tasks);
-        const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
+        const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage | GeneratedImage[]> => item.status === "fulfilled").flatMap((item) => item.value);
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
@@ -318,6 +381,33 @@ export default function ImagePage() {
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
+    const runMjBatchSlots = async (startIndex: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
+        const itemStartedAt = performance.now();
+        try {
+            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            if (!result.length) throw new Error(t("imageWorkbench.missingResult"));
+            const generated = await Promise.all(
+                [0, 1, 2, 3].map(async (offset) => {
+                    const image = result[offset];
+                    if (!image) return null;
+                    const stored = await uploadImage(image.dataUrl);
+                    const nextImage: GeneratedImage = { id: image.id, dataUrl: stored.url, ...(stored.storageKey ? { storageKey: stored.storageKey } : {}), durationMs: performance.now() - itemStartedAt, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+                    setResults((value) => updateResultAt(value, startIndex + offset, { status: "success", image: nextImage }));
+                    return nextImage;
+                }),
+            );
+            return generated.filter((item): item is GeneratedImage => Boolean(item));
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : t("workbench.generationFailed");
+            setResults((value) => {
+                let next = value;
+                for (let offset = 0; offset < 4; offset += 1) next = updateResultAt(next, startIndex + offset, { status: "failed", error: msg });
+                return next;
+            });
+            throw error;
+        }
+    };
+
     const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
@@ -398,7 +488,17 @@ export default function ImagePage() {
                             <div>
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">{t("workbench.prompt")}</span>
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-wrap gap-2">
+                                        {promptBeforeOptimize !== null && !optimizing ? (
+                                            <Button size="small" icon={<RotateCcw className="size-3.5" />} onClick={() => { setPrompt(promptBeforeOptimize); setPromptBeforeOptimize(null); }}>
+                                                撤销优化
+                                            </Button>
+                                        ) : null}
+                                        <Tooltip title={`按${optimizeSpec.specLabel}优化提示词`}>
+                                            <Button size="small" icon={optimizing ? <LoaderCircle className="size-3.5 animate-spin" /> : <WandSparkles className="size-3.5" />} disabled={!optimizing && !prompt.trim()} onClick={() => void handleOptimizePrompt()}>
+                                                {optimizing ? "停止优化" : "优化提示词"}
+                                            </Button>
+                                        </Tooltip>
                                         <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
                                             {t("workbench.viewPrompts")}
                                         </Button>

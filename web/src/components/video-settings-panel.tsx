@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { H3_DEFAULT_STEPS, H3_MAX_STEPS, isMiniMaxH3, isMiniMaxH3Fast } from "@/constant/comfyui";
+import { getDreamMakerVideoSpec } from "@/constant/dreammaker";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { clampVideoSeconds, computeVideoSize, inferVideoRatio, parseVideoResolution, readVideoDimensions, VIDEO_SECONDS_MAX, VIDEO_SECONDS_MIN, videoRatioOptions } from "@/lib/media-size";
@@ -36,54 +37,92 @@ type VideoSettingsPanelProps = {
 
 export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
     const { t } = useTranslation();
-    const h3 = isMiniMaxH3(config.model || config.videoModel);
-    const fast = isMiniMaxH3Fast(config.model || config.videoModel);
-    const modes = h3 ? [{ value: "text", labelKey: "text" }, ...videoModeOptions] : videoModeOptions;
-    const seconds = Number(clampVideoSeconds(config.videoSeconds || "6"));
-    const videoMode = normalizeVideoModeValue(config.videoMode);
-    const resolution = parseVideoResolution(config.vquality);
+    const activeModel = config.model || config.videoModel;
+    const h3 = isMiniMaxH3(activeModel);
+    const fast = isMiniMaxH3Fast(activeModel);
+    const dmSpec = getDreamMakerVideoSpec(activeModel);
+    const dmSeedance = dmSpec?.family === "seedance";
+    const dmH3 = dmSpec?.family === "h3";
+    const modes = dmSeedance
+        ? [
+              { value: "text", labelKey: "text" },
+              { value: "frames", labelKey: "frames" },
+              { value: "reference", labelKey: "reference" },
+              ...(dmSpec.supportsEditExtend ? [{ value: "edit", labelKey: "edit" }, { value: "extend", labelKey: "extend" }] : []),
+          ]
+        : h3 || dmH3
+          ? [{ value: "text", labelKey: "text" }, ...videoModeOptions]
+          : videoModeOptions;
+    const isSmartSeconds = dmSeedance && String(config.videoSeconds || "").trim() === "-1";
+    const maxSeconds = dmSpec ? dmSpec.maxSeconds : VIDEO_SECONDS_MAX;
+    const rawSeconds = Math.max(VIDEO_SECONDS_MIN, Math.min(maxSeconds, Math.floor(Number(config.videoSeconds) || 5)));
+    const seconds = Number(clampVideoSeconds(String(rawSeconds)));
+    const rawMode = normalizeVideoModeValue(config.videoMode);
+    const videoMode = modes.some((item) => item.value === rawMode) ? rawMode : "frames";
+    const rawQuality = (config.vquality || "").trim().toLowerCase();
+    const resolution =
+        dmSeedance && rawQuality === "480_draft" && dmSpec.resolutions.includes("480_draft")
+            ? "480_draft"
+            : dmSpec
+              ? dmSpec.resolutions.includes(parseVideoResolution(config.vquality))
+                  ? parseVideoResolution(config.vquality)
+                  : dmSpec.defaultResolution
+              : parseVideoResolution(config.vquality);
     const selectedRatio = inferVideoRatio(config.size || "auto");
-    const dimensions = readVideoDimensions(config.size || "auto", resolution, selectedRatio);
+    const dimensions = readVideoDimensions(config.size || "auto", resolution === "480_draft" ? "480" : resolution, selectedRatio);
     const applySize = (nextResolution: string, ratio: string) => {
         onConfigChange("vquality", nextResolution);
-        onConfigChange("size", computeVideoSize(nextResolution, ratio));
+        onConfigChange("size", dmSpec ? ratio : computeVideoSize(nextResolution === "480_draft" ? "480" : nextResolution, ratio));
     };
     const selectResolution = (nextResolution: string) => {
-        if (selectedRatio === "auto") onConfigChange("vquality", nextResolution);
+        if (selectedRatio === "auto" || dmSpec) onConfigChange("vquality", nextResolution);
         else applySize(nextResolution, selectedRatio);
     };
+    const dmResolutionButtons = dmSpec
+        ? dmSpec.resolutions.map((value) => ({
+              value,
+              label: value === "480_draft" ? "480p 草稿" : value === "1440" ? "2K" : value === "2160" ? "4K" : value === "768" ? "768P" : `${value}p`,
+          }))
+        : h3
+          ? h3ResolutionOptions
+          : resolutionOptions;
 
     return (
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.video.title")}</div> : null}
-                {h3 ? (
+                {h3 || dmSeedance ? (
                     <div className="space-y-1.5">
                         <div className="flex items-center justify-between gap-3">
                             <span className="text-sm font-medium">{t("settingsPanels.video.generateAudio")}</span>
                             <Switch size="small" aria-label="生成声音" checked={boolConfig(config.videoGenerateAudio, true)} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} />
                         </div>
-                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>关闭后输出静音视频。只去掉配乐、保留人声或音效，请在提示词中说明。</p>
+                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                            {dmSeedance ? "开启后同期生成环境音效或人声；无需音轨时关闭（输出纯静音）。" : "关闭后输出静音视频。只去掉配乐、保留人声或音效，请在提示词中说明。"}
+                        </p>
                     </div>
                 ) : null}
                 <SettingGroup title={t("settingsPanels.video.quality")} color={theme.node.muted}>
-                    <div className={`grid ${h3 ? "grid-cols-3" : "grid-cols-4"} gap-2.5`}>
-                        {(h3 ? h3ResolutionOptions : resolutionOptions).map((item) => (
+                    <div className={`grid ${dmResolutionButtons.length >= 4 || h3 ? "grid-cols-3" : dmSpec ? "grid-cols-2" : "grid-cols-4"} gap-2.5`}>
+                        {dmResolutionButtons.map((item) => (
                             <OptionPill key={item.value} selected={resolution === item.value} theme={theme} onClick={() => selectResolution(item.value)}>
                                 {item.label}
                             </OptionPill>
                         ))}
-                        <ResolutionInput value={resolution} theme={theme} onChange={selectResolution} />
+                        {!dmSpec ? <ResolutionInput value={resolution} theme={theme} onChange={selectResolution} /> : null}
                     </div>
                     {h3 && Number(resolution) > 1440 ? <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>按分辨率和时长自动选择生成尺寸（越长越省），再经放大链补到目标分辨率：更稳、显存更省。</p> : null}
+                    {dmSeedance && resolution === "480_draft" ? <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>低算力预览草稿，生成后可在视频节点一键升级为 1080p 或 4K 正式成片。</p> : null}
                 </SettingGroup>
-                <SettingGroup title={t("settingsPanels.video.size")} color={theme.node.muted}>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
-                        <DimensionInput prefix="W" value={dimensions.width} disabled={selectedRatio === "auto"} theme={theme} onChange={(value) => updateDimension("width", value, dimensions, onConfigChange)} />
-                        <span className="text-lg opacity-45">↔</span>
-                        <DimensionInput prefix="H" value={dimensions.height} disabled={selectedRatio === "auto"} theme={theme} onChange={(value) => updateDimension("height", value, dimensions, onConfigChange)} />
-                    </div>
-                </SettingGroup>
+                {!dmSpec ? (
+                    <SettingGroup title={t("settingsPanels.video.size")} color={theme.node.muted}>
+                        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
+                            <DimensionInput prefix="W" value={dimensions.width} disabled={selectedRatio === "auto"} theme={theme} onChange={(value) => updateDimension("width", value, dimensions, onConfigChange)} />
+                            <span className="text-lg opacity-45">↔</span>
+                            <DimensionInput prefix="H" value={dimensions.height} disabled={selectedRatio === "auto"} theme={theme} onChange={(value) => updateDimension("height", value, dimensions, onConfigChange)} />
+                        </div>
+                    </SettingGroup>
+                ) : null}
                 <SettingGroup title={t("settingsPanels.video.ratio")} color={theme.node.muted}>
                     <div className="grid grid-cols-4 gap-2.5">
                         {videoRatioOptions.map((item) => (
@@ -100,23 +139,69 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                             </button>
                         ))}
                     </div>
+                    {dmSeedance && videoMode === "frames" ? (
+                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                            图生视频（首尾帧）模式下输出比例强制跟随首帧图片，此处比例参数不会发送。
+                        </p>
+                    ) : null}
+                    {dmSeedance && (videoMode === "edit" || videoMode === "extend") ? (
+                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                            视频编辑 / 延长模式下输出比例固定自适应原视频。
+                        </p>
+                    ) : null}
                 </SettingGroup>
                 <SettingGroup title={t("settingsPanels.video.seconds")} color={theme.node.muted}>
-                    <div className="flex items-center gap-3" onMouseDown={(event) => event.stopPropagation()}>
-                        <Slider className="min-w-0 flex-1" min={VIDEO_SECONDS_MIN} max={VIDEO_SECONDS_MAX} step={1} value={seconds} onChange={(value) => onConfigChange("videoSeconds", String(Array.isArray(value) ? value[0] : value))} />
-                        <SecondsInput value={seconds} theme={theme} onCommit={(value) => onConfigChange("videoSeconds", String(value))} />
-                        <span className="shrink-0 text-sm" style={{ color: theme.node.muted }}>s</span>
-                    </div>
+                    {dmSeedance && videoMode === "edit" ? (
+                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                            视频编辑模式时长由原视频决定（自动）。
+                        </p>
+                    ) : (
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-3" onMouseDown={(event) => event.stopPropagation()}>
+                                <Slider className="min-w-0 flex-1" min={VIDEO_SECONDS_MIN} max={maxSeconds} step={1} disabled={isSmartSeconds} value={seconds} onChange={(value) => onConfigChange("videoSeconds", String(Array.isArray(value) ? value[0] : value))} />
+                                <SecondsInput value={seconds} max={maxSeconds} disabled={isSmartSeconds} theme={theme} onCommit={(value) => onConfigChange("videoSeconds", String(value))} />
+                                <span className="shrink-0 text-sm" style={{ color: theme.node.muted }}>s</span>
+                            </div>
+                            {dmSeedance ? (
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs" style={{ color: theme.node.muted }}>智能时长（由模型自动决定）</span>
+                                    <Switch size="small" checked={isSmartSeconds} onChange={(checked) => onConfigChange("videoSeconds", checked ? "-1" : String(seconds))} />
+                                </div>
+                            ) : null}
+                        </div>
+                    )}
                 </SettingGroup>
                 <SettingGroup title={t("settingsPanels.video.mode")} color={theme.node.muted}>
-                    <div className={`grid ${h3 ? "grid-cols-3" : "grid-cols-2"} gap-2.5`}>
+                    <div className={`grid ${modes.length >= 3 ? "grid-cols-3" : "grid-cols-2"} gap-2.5`}>
                         {modes.map((item) => (
                             <OptionPill key={item.value} selected={videoMode === item.value} theme={theme} onClick={() => onConfigChange("videoMode", item.value)}>
-                                {h3 ? { text: "文生视频", frames: "图生视频", reference: "参考生视频" }[item.value as "text" | "frames" | "reference"] : t(`settingsPanels.video.modes.${item.labelKey}`)}
+                                {h3 || dmSpec
+                                    ? { text: "文生视频", frames: "图生视频", reference: dmSeedance ? "多模态参考" : "参考生视频", edit: "视频编辑", extend: "视频延长" }[item.value as "text" | "frames" | "reference" | "edit" | "extend"]
+                                    : t(`settingsPanels.video.modes.${item.labelKey}`)}
                             </OptionPill>
                         ))}
                     </div>
                 </SettingGroup>
+                {dmSpec ? (
+                    <details className="group">
+                        <summary className="!flex cursor-pointer list-none items-center justify-between py-1 text-sm [&::-webkit-details-marker]:hidden">
+                            高级设置
+                            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+                        </summary>
+                        <div className="space-y-4 pt-3">
+                            {dmSeedance ? (
+                                <SettingGroup title="随机种子" color={theme.node.muted}>
+                                    <InputNumber className="!w-full !rounded-xl" aria-label="随机种子" min={0} max={Number.MAX_SAFE_INTEGER} precision={0} controls={false} placeholder="留空随机 (-1)" value={config.videoSeed ? Number(config.videoSeed) : null} onChange={(value) => onConfigChange("videoSeed", value === null ? "" : String(value))} />
+                                    <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>Seedance 网关不支持 camera_fixed 字段；如需锁机位，请用「优化提示词」写入锁机位描述。</p>
+                                </SettingGroup>
+                            ) : null}
+                            <div className="flex items-center justify-between gap-3">
+                                <span className="text-sm font-medium">{t("settingsPanels.video.watermark")}</span>
+                                <Switch size="small" checked={boolConfig(config.videoWatermark, false)} onChange={(checked) => onConfigChange("videoWatermark", String(checked))} />
+                            </div>
+                        </div>
+                    </details>
+                ) : null}
                 {h3 ? (
                     <details className="group">
                         <summary className="!flex cursor-pointer list-none items-center justify-between py-1 text-sm [&::-webkit-details-marker]:hidden">
@@ -168,8 +253,9 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
 }
 
 export function videoResolutionLabel(value: string) {
+    if (String(value || "").trim().toLowerCase() === "480_draft") return "草稿";
     const resolution = parseVideoResolution(value);
-    return resolution === "1440" ? "2K" : resolution === "2160" ? "4K" : `${resolution}p`;
+    return resolution === "1440" ? "2K" : resolution === "2160" ? "4K" : resolution === "768" ? "768P" : `${resolution}p`;
 }
 
 export function videoSizeLabel(value: string) {
@@ -183,7 +269,10 @@ export function videoSecondsLabel(value: string) {
 }
 
 export function videoModeLabel(value: string) {
-    return i18n.t(`settingsPanels.video.modes.${normalizeVideoModeValue(value)}`);
+    const normalized = normalizeVideoModeValue(value);
+    if (normalized === "edit") return "视频编辑";
+    if (normalized === "extend") return "视频延长";
+    return i18n.t(`settingsPanels.video.modes.${normalized}`);
 }
 
 export function videoAudioLabel(value: string) {
@@ -191,7 +280,7 @@ export function videoAudioLabel(value: string) {
 }
 
 export function normalizeVideoModeValue(value: string | undefined) {
-    return value === "reference" || value === "text" ? value : "frames";
+    return value === "reference" || value === "text" || value === "edit" || value === "extend" ? value : "frames";
 }
 
 export function normalizeVideoSizeValue(value: string, resolution = "720") {
@@ -240,19 +329,21 @@ function ResolutionInput({ value, theme, onChange }: { value: string; theme: Can
     );
 }
 
-function SecondsInput({ value, theme, onCommit }: { value: number; theme: CanvasTheme; onCommit: (value: number) => void }) {
+function SecondsInput({ value, max = VIDEO_SECONDS_MAX, disabled = false, theme, onCommit }: { value: number; max?: number; disabled?: boolean; theme: CanvasTheme; onCommit: (value: number) => void }) {
     const commit = (input: HTMLInputElement) => {
-        const next = Number(clampVideoSeconds(input.value));
+        const parsed = Math.floor(Number(input.value) || 6);
+        const next = Math.max(VIDEO_SECONDS_MIN, Math.min(max, parsed));
         input.value = String(next);
         onCommit(next);
     };
 
     return (
-        <label className="flex h-9 w-[68px] shrink-0 overflow-hidden rounded-xl text-sm" style={{ background: theme.node.fill, color: theme.node.text }}>
+        <label className="flex h-9 w-[68px] shrink-0 overflow-hidden rounded-xl text-sm" style={{ background: theme.node.fill, color: theme.node.text, opacity: disabled ? 0.55 : 1 }}>
             <input
                 type="number"
                 min={VIDEO_SECONDS_MIN}
-                max={VIDEO_SECONDS_MAX}
+                max={max}
+                disabled={disabled}
                 className="min-w-0 flex-1 bg-transparent px-2 text-center outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 defaultValue={value}
                 key={value}

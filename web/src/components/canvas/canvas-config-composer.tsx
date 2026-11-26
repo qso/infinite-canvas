@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent } from "react";
-import { Button, Image } from "antd";
-import { FileText, Group, Image as ImageIcon, Music2, Video, X } from "lucide-react";
+import { App, Button, Image, Tooltip } from "antd";
+import { FileText, Group, Image as ImageIcon, LoaderCircle, Music2, RotateCcw, Sparkles, Video, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { buildGenerationConfig, getInputSummary } from "@/lib/canvas/canvas-generation-helpers";
+import { getPromptOptimizeSpec, optimizeModelPrompt } from "@/lib/prompt-optimizer";
+import { resolveModelForCapability, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { NodeGenerationInput } from "./canvas-node-generation";
 import { CanvasNodeReferenceBar } from "./canvas-node-reference-bar";
@@ -35,12 +38,89 @@ export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g;
 
 export function CanvasConfigComposer({ nodeId, nodes, value, inputs, connectedNodes = [], onChange, onClose, onDisconnectReference, onStartReferenceSelection }: CanvasConfigComposerProps) {
     const { t } = useTranslation();
+    const { message } = App.useApp();
+    const globalConfig = useEffectiveConfig();
+    const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
+    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
+    const [optimizing, setOptimizing] = useState(false);
+    const [valueBeforeOptimize, setValueBeforeOptimize] = useState<string | null>(null);
+    const optimizeControllerRef = useRef<AbortController | null>(null);
+    const sourceNode = useMemo(() => nodes.find((item) => item.id === nodeId), [nodeId, nodes]);
+    const mode = sourceNode?.metadata?.generationMode || "image";
+    const nodeConfig = useMemo(() => buildGenerationConfig(globalConfig, sourceNode, mode), [globalConfig, mode, sourceNode]);
+    const summary = useMemo(() => getInputSummary(inputs), [inputs]);
+    const optimizeSpec = useMemo(
+        () =>
+            getPromptOptimizeSpec({
+                mode,
+                model: nodeConfig.model,
+                config: nodeConfig,
+                imageCount: summary.imageCount,
+                videoCount: summary.videoCount,
+                audioCount: summary.audioCount,
+            }),
+        [mode, nodeConfig, summary],
+    );
+
+    const handleOptimize = async () => {
+        if (optimizing) {
+            optimizeControllerRef.current?.abort();
+            setOptimizing(false);
+            return;
+        }
+        const draft = value.trim();
+        if (!draft) {
+            message.warning("请先输入简短的提示词或想法，再进行优化");
+            return;
+        }
+        const textModel = resolveModelForCapability(globalConfig, globalConfig.textModel, "text");
+        if (!isAiConfigReady(globalConfig, textModel)) {
+            message.warning("请先在设置中配置文本模型（用于提示词优化）");
+            openConfigDialog(true);
+            return;
+        }
+        const controller = new AbortController();
+        optimizeControllerRef.current = controller;
+        setValueBeforeOptimize(value);
+        setOptimizing(true);
+        try {
+            const note = value.includes("@[node:") ? "\n（请原样保留所有 @[node:...] 引用占位符，不要改动或删除它们）" : "";
+            const optimized = await optimizeModelPrompt(
+                { ...globalConfig, textModel },
+                `${draft}${note}`,
+                {
+                    mode,
+                    model: nodeConfig.model,
+                    config: nodeConfig,
+                    imageCount: summary.imageCount,
+                    videoCount: summary.videoCount,
+                    audioCount: summary.audioCount,
+                },
+                (partial) => {
+                    if (!controller.signal.aborted && partial.trim()) onChange(partial);
+                },
+                controller.signal,
+            );
+            if (!controller.signal.aborted && optimized) {
+                onChange(optimized);
+                message.success(`已按${optimizeSpec.specLabel}优化提示词`);
+            }
+        } catch (error) {
+            if (!(error instanceof DOMException && error.name === "AbortError")) {
+                message.error(error instanceof Error ? error.message : "提示词优化失败");
+                setValueBeforeOptimize(null);
+            }
+        } finally {
+            if (optimizeControllerRef.current === controller) optimizeControllerRef.current = null;
+            setOptimizing(false);
+        }
+    };
     const tokens = useMemo(() => parseComposerTokens(value), [value]);
     const referenceById = useMemo(() => new Map(inputs.map((input) => [input.nodeId, input])), [inputs]);
     const candidates = useMemo(() => {
@@ -128,7 +208,23 @@ export function CanvasConfigComposer({ nodeId, nodes, value, inputs, connectedNo
                     <div className="shrink-0 text-xs font-semibold">{t("canvas.composer.title")}</div>
                     <div className="truncate text-[11px] opacity-55">{t("canvas.composer.description")}</div>
                 </div>
-                <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
+                <div className="flex shrink-0 items-center gap-1">
+                    {mode === "image" || mode === "video" ? (
+                        <>
+                            {valueBeforeOptimize !== null && !optimizing ? (
+                                <Tooltip title="撤销提示词优化">
+                                    <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<RotateCcw className="size-3.5" />} onClick={() => { onChange(valueBeforeOptimize); setValueBeforeOptimize(null); }} />
+                                </Tooltip>
+                            ) : null}
+                            <Tooltip title={optimizing ? "停止优化" : `按${optimizeSpec.specLabel}优化提示词`}>
+                                <Button size="small" type="text" className="!h-7 !px-2 text-xs" disabled={!optimizing && !value.trim()} icon={optimizing ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} onClick={() => void handleOptimize()}>
+                                    {optimizing ? "停止" : "优化"}
+                                </Button>
+                            </Tooltip>
+                        </>
+                    ) : null}
+                    <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
+                </div>
             </div>
             <CanvasNodeReferenceBar nodeId={nodeId} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={onStartReferenceSelection} />
             <div className="relative rounded-xl">

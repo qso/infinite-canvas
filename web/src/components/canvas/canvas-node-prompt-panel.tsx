@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, LoaderCircle, Maximize2, Square } from "lucide-react";
-import { Button, Modal, Tooltip } from "antd";
+import { ArrowUp, LoaderCircle, Maximize2, RotateCcw, Sparkles, Square } from "lucide-react";
+import { App, Button, Modal, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { ModelPicker } from "@/components/model-picker";
 import { normalizeVideoModeValue } from "@/components/video-settings-panel";
 import { H3_REFERENCE_PROMPT_TEMPLATES, isMiniMaxH3 } from "@/constant/comfyui";
+import { isDreamMakerSeedance, SEEDANCE_FRAMES_PROMPT_TEMPLATES, SEEDANCE_REFERENCE_PROMPT_TEMPLATES } from "@/constant/dreammaker";
 import { isFireRedSpeech, isFireRedUnderstand } from "@/constant/firered";
+import { buildGenerationConfig } from "@/lib/canvas/canvas-generation-helpers";
 import { runFireRedUnderstandTask } from "@/lib/canvas/fire-red-generation";
-import { defaultConfig, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { getPromptOptimizeSpec, optimizeModelPrompt } from "@/lib/prompt-optimizer";
+import { resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -41,11 +44,13 @@ type CanvasNodePromptPanelProps = {
 
 export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectedNodes = [], onDisconnectReference, onStartReferenceSelection, onImageSettingsOpenChange, modeOverride }: CanvasNodePromptPanelProps) {
     const { t } = useTranslation();
+    const { message } = App.useApp();
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = modeOverride ?? defaultMode(node.type);
-    const config = buildNodeConfig(globalConfig, node, mode);
+    const config = buildGenerationConfig(globalConfig, node, mode);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     // FireRedAudio 识别/理解：连接音频参考后允许空提示词（空 = 纯转写）。
@@ -66,13 +71,21 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
             : mode === "text" && hasTextContent
               ? "editText"
               : mode;
-    const showReferenceTemplates = mode === "video" && isMiniMaxH3(config.model) && normalizeVideoModeValue(config.videoMode) === "reference";
+    const normalizedVideoMode = normalizeVideoModeValue(config.videoMode);
+    const showReferenceTemplates = mode === "video" && isMiniMaxH3(config.model) && normalizedVideoMode === "reference";
+    const showSeedanceTemplates = mode === "video" && isDreamMakerSeedance(config.model) && (normalizedVideoMode === "reference" || normalizedVideoMode === "frames");
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
     const [expanded, setExpanded] = useState(false);
+    const [optimizing, setOptimizing] = useState(false);
+    const [promptBeforeOptimize, setPromptBeforeOptimize] = useState<string | null>(null);
+    const optimizeControllerRef = useRef<AbortController | null>(null);
 
     // Restore prompts only when switching nodes; preserve the current input after generation on the same node.
     useEffect(() => {
+        optimizeControllerRef.current?.abort();
+        setOptimizing(false);
+        setPromptBeforeOptimize(null);
         setPrompt(node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [node.id]);
@@ -85,8 +98,77 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
 
     // 图像编辑的参考图（按生成顺序）：编辑已有图片且未开原地覆盖时，节点自身是第 1 张参考图。
     const mentionImages = mentionReferences.filter((reference) => reference.kind === "image");
+    const mentionVideos = mentionReferences.filter((reference) => reference.kind === "video");
+    const mentionAudios = mentionReferences.filter((reference) => reference.kind === "audio");
     const selfIsReference = mode === "image" && hasImageContent && globalConfig.nodeRegenerateBehavior !== "overwrite";
     const imageReferenceInfo = { count: mentionImages.length + (selfIsReference ? 1 : 0), firstUrl: selfIsReference ? node.metadata?.content : mentionImages[0]?.previewUrl };
+    const optimizeSpec = getPromptOptimizeSpec({
+        mode,
+        model: config.model,
+        config,
+        imageCount: imageReferenceInfo.count,
+        videoCount: mentionVideos.length,
+        audioCount: mentionAudios.length,
+    });
+
+    const handleOptimizePrompt = async () => {
+        if (optimizing) {
+            optimizeControllerRef.current?.abort();
+            setOptimizing(false);
+            return;
+        }
+        const draft = prompt.trim();
+        if (!draft) {
+            message.warning("请先输入简短的提示词或想法，再进行优化");
+            return;
+        }
+        const textModel = resolveModelForCapability(globalConfig, globalConfig.textModel, "text");
+        if (!isAiConfigReady(globalConfig, textModel)) {
+            message.warning("请先在设置中配置文本模型（用于提示词优化）");
+            openConfigDialog(true);
+            return;
+        }
+        const controller = new AbortController();
+        optimizeControllerRef.current = controller;
+        setPromptBeforeOptimize(prompt);
+        setOptimizing(true);
+        try {
+            const optimized = await optimizeModelPrompt(
+                { ...globalConfig, textModel },
+                draft,
+                {
+                    mode,
+                    model: config.model,
+                    config,
+                    imageCount: imageReferenceInfo.count,
+                    videoCount: mentionVideos.length,
+                    audioCount: mentionAudios.length,
+                },
+                (partial) => {
+                    if (!controller.signal.aborted && partial.trim()) updatePrompt(partial);
+                },
+                controller.signal,
+            );
+            if (!controller.signal.aborted && optimized) {
+                updatePrompt(optimized);
+                message.success(`已按${optimizeSpec.specLabel}优化提示词`);
+            }
+        } catch (error) {
+            if (!(error instanceof DOMException && error.name === "AbortError")) {
+                message.error(error instanceof Error ? error.message : "提示词优化失败");
+                setPromptBeforeOptimize(null);
+            }
+        } finally {
+            if (optimizeControllerRef.current === controller) optimizeControllerRef.current = null;
+            setOptimizing(false);
+        }
+    };
+
+    const handleUndoOptimize = () => {
+        if (promptBeforeOptimize === null) return;
+        updatePrompt(promptBeforeOptimize);
+        setPromptBeforeOptimize(null);
+    };
     // 声音克隆「自动识别」：用 FireRedAudio 自己的 ASR 转写第一个上游音频参考，填入参考转写框。
     const fireRedTranscribeControllerRef = useRef<AbortController | null>(null);
     const handleFireRedAutoTranscribe = useCallback(async (): Promise<string> => {
@@ -120,7 +202,8 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
             onWheel={(event) => event.stopPropagation()}
         >
             <CanvasNodeReferenceBar nodeId={node.id} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={onStartReferenceSelection} />
-            {showReferenceTemplates ? <ReferenceTemplateChips prompt={prompt} onApply={updatePrompt} /> : null}
+            {showReferenceTemplates ? <ReferenceTemplateChips templates={H3_REFERENCE_PROMPT_TEMPLATES} prompt={prompt} onApply={updatePrompt} /> : null}
+            {showSeedanceTemplates ? <ReferenceTemplateChips templates={normalizedVideoMode === "reference" ? SEEDANCE_REFERENCE_PROMPT_TEMPLATES : SEEDANCE_FRAMES_PROMPT_TEMPLATES} prompt={prompt} onApply={updatePrompt} /> : null}
             <CanvasPromptChipInput
                 value={prompt}
                 references={mentionReferences}
@@ -137,6 +220,33 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                         <Button type="text" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0" style={{ color: theme.node.text }} icon={<Maximize2 className="size-3.5" />} onClick={openExpandedEditor} aria-label={t("canvas.promptPanel.expandEditor")} />
                     </Tooltip>
                     <CanvasPromptLibrary onSelect={updatePrompt} />
+                    {(mode === "image" || mode === "video") ? (
+                        <>
+                            <Tooltip title={optimizing ? "停止优化" : `按${optimizeSpec.specLabel}优化提示词`}>
+                                <Button
+                                    type="text"
+                                    className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0"
+                                    style={{ color: theme.node.text }}
+                                    disabled={!optimizing && !prompt.trim()}
+                                    icon={optimizing ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                                    onClick={() => void handleOptimizePrompt()}
+                                    aria-label="优化提示词"
+                                />
+                            </Tooltip>
+                            {promptBeforeOptimize !== null && !optimizing ? (
+                                <Tooltip title="撤销提示词优化">
+                                    <Button
+                                        type="text"
+                                        className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0"
+                                        style={{ color: theme.node.text }}
+                                        icon={<RotateCcw className="size-3.5" />}
+                                        onClick={handleUndoOptimize}
+                                        aria-label="撤销提示词优化"
+                                    />
+                                </Tooltip>
+                            ) : null}
+                        </>
+                    ) : null}
                     {mode === "image" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
@@ -191,7 +301,8 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
             <Modal title={t("canvas.promptPanel.editorTitle")} open={expanded} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
                     <CanvasNodeReferenceBar nodeId={node.id} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={(nodeId) => { setExpanded(false); onStartReferenceSelection?.(nodeId); }} />
-                    {showReferenceTemplates ? <ReferenceTemplateChips prompt={prompt} onApply={updatePrompt} /> : null}
+                    {showReferenceTemplates ? <ReferenceTemplateChips templates={H3_REFERENCE_PROMPT_TEMPLATES} prompt={prompt} onApply={updatePrompt} /> : null}
+                    {showSeedanceTemplates ? <ReferenceTemplateChips templates={normalizedVideoMode === "reference" ? SEEDANCE_REFERENCE_PROMPT_TEMPLATES : SEEDANCE_FRAMES_PROMPT_TEMPLATES} prompt={prompt} onApply={updatePrompt} /> : null}
                     <CanvasPromptChipInput
                         value={prompt}
                         references={mentionReferences}
@@ -200,17 +311,34 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                         style={{ background: "transparent", borderColor: theme.toolbar.border, color: theme.node.text }}
                         placeholder={t(`canvas.promptPanel.${placeholderKey}`)}
                     />
+                    {(mode === "image" || mode === "video") ? (
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                            {promptBeforeOptimize !== null && !optimizing ? (
+                                <Button size="small" icon={<RotateCcw className="size-3.5" />} onClick={handleUndoOptimize}>
+                                    撤销优化
+                                </Button>
+                            ) : null}
+                            <Button
+                                size="small"
+                                icon={optimizing ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                                disabled={!optimizing && !prompt.trim()}
+                                onClick={() => void handleOptimizePrompt()}
+                            >
+                                {optimizing ? "停止优化" : `按${optimizeSpec.specLabel}优化`}
+                            </Button>
+                        </div>
+                    ) : null}
                 </div>
             </Modal>
         </div>
     );
 }
 
-function ReferenceTemplateChips({ prompt, onApply }: { prompt: string; onApply: (value: string) => void }) {
+function ReferenceTemplateChips({ templates, prompt, onApply }: { templates: Array<{ label: string; prompt: string }>; prompt: string; onApply: (value: string) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     return (
         <div className="mb-2 flex flex-wrap gap-1.5">
-            {H3_REFERENCE_PROMPT_TEMPLATES.map((template) => (
+            {templates.map((template) => (
                 <button
                     key={template.label}
                     type="button"
@@ -228,36 +356,6 @@ function ReferenceTemplateChips({ prompt, onApply }: { prompt: string; onApply: 
 
 function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
     return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
-}
-
-function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode): AiConfig {
-    return {
-        ...globalConfig,
-        model: resolveModelForCapability(globalConfig, node.metadata?.model, mode),
-        reasoningEffort: node.metadata?.reasoningEffort || globalConfig.reasoningEffort || defaultConfig.reasoningEffort,
-        quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
-        size: node.metadata?.size || globalConfig.size || defaultConfig.size,
-        background: node.metadata?.background ?? globalConfig.background ?? defaultConfig.background,
-        imageSteps: node.metadata?.imageSteps ?? globalConfig.imageSteps ?? defaultConfig.imageSteps,
-        imageCfg: node.metadata?.imageCfg ?? globalConfig.imageCfg ?? defaultConfig.imageCfg,
-        imageSeed: node.metadata?.imageSeed ?? globalConfig.imageSeed ?? defaultConfig.imageSeed,
-        imageNegative: node.metadata?.imageNegative ?? globalConfig.imageNegative ?? defaultConfig.imageNegative,
-        imageResolution: node.metadata?.imageResolution ?? globalConfig.imageResolution ?? defaultConfig.imageResolution,
-        videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,
-        vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,
-        videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
-        videoWatermark: node.metadata?.watermark || globalConfig.videoWatermark || defaultConfig.videoWatermark,
-        videoMode: node.metadata?.videoMode || globalConfig.videoMode || defaultConfig.videoMode,
-        videoSteps: node.metadata?.videoSteps ?? globalConfig.videoSteps ?? defaultConfig.videoSteps,
-        videoSeed: node.metadata?.videoSeed ?? globalConfig.videoSeed ?? defaultConfig.videoSeed,
-        videoRefImageSize: node.metadata?.videoRefImageSize ?? globalConfig.videoRefImageSize ?? defaultConfig.videoRefImageSize,
-        videoHd: node.metadata?.videoHd ?? globalConfig.videoHd ?? defaultConfig.videoHd,
-        audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice,
-        audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
-        audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,
-        audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions || defaultConfig.audioInstructions,
-        count: String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
-    };
 }
 
 function videoConfigPatch(key: keyof AiConfig, value: string) {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Settings2, SlidersHorizontal, Trash2, Ungroup, Upload, Video } from "lucide-react";
+import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Settings2, SlidersHorizontal, Sparkles, Trash2, Ungroup, Upload, Video } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -41,6 +41,7 @@ type CanvasNodeHoverToolbarProps = {
     onUngroup?: (node: CanvasNodeData) => void;
     onAcousticEdit?: (node: CanvasNodeData) => void;
     showAcousticEdit?: boolean;
+    onPromoteDraft?: (node: CanvasNodeData, resolution: "1080p" | "4k") => void;
     extraTools?: CanvasNodeToolbarItem[];
 };
 
@@ -81,6 +82,7 @@ export function CanvasNodeHoverToolbar({
     onUngroup,
     onAcousticEdit,
     showAcousticEdit = false,
+    onPromoteDraft,
     extraTools = [],
 }: CanvasNodeHoverToolbarProps) {
     const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
@@ -156,6 +158,12 @@ export function CanvasNodeHoverToolbar({
         ...(hasImage || hasVideo || isText ? [{ id: "saveAsset", title: t("common.addToAssets"), label: t("canvas.nodeToolbar.saveAsset"), icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...(hasImage || hasVideo || hasAudio ? [{ id: "download", title: t(hasAudio ? "canvas.nodeToolbar.downloadAudio" : hasVideo ? "canvas.nodeToolbar.downloadVideo" : "canvas.nodeToolbar.downloadImage"), label: t("common.download"), icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
         ...(isVideo || isMusic ? [{ id: "edit", title: t("common.edit"), label: t("common.edit"), icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
+        ...(isVideo && hasVideo && node.metadata?.dmDraftTaskId && onPromoteDraft
+            ? [
+                  { id: "promoteDraft1080", title: "将 Seedance 草稿升为 1080p 正式成片", label: "升 1080p", icon: <Sparkles className="size-4" />, onClick: () => onPromoteDraft(node, "1080p") },
+                  { id: "promoteDraft4k", title: "将 Seedance 草稿升为 4K 正式成片", label: "升 4K", icon: <Sparkles className="size-4" />, onClick: () => onPromoteDraft(node, "4k") },
+              ]
+            : []),
         ...(isText ? [{ id: "generateImage", title: t("canvas.node.generateImage"), label: t("canvas.node.generate"), icon: <ImageIcon className="size-4" />, onClick: () => onGenerateImage(node) }] : []),
         ...(isConfig ? [{ id: "config", title: t("canvas.configNode.title"), label: t("canvas.configNode.title"), icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "decreaseFont", title: t("canvas.nodeToolbar.decreaseFont"), label: t("canvas.nodeToolbar.zoomOut"), icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),

@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
 import { H3_DEFAULT_STEPS, isMiniMaxH3, isMiniMaxH3Fast } from "@/constant/comfyui";
+import { isDreamMakerVideo } from "@/constant/dreammaker";
 import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
 import { clampVideoSeconds, computeVideoSize, inferVideoRatio, parseVideoResolution } from "@/lib/media-size";
 import { getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
@@ -10,6 +11,7 @@ import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
 import { createH3VideoTask, pollH3VideoTask } from "./comfyui-h3";
+import { createDreamMakerVideoTask, pollDreamMakerVideoTask } from "./dreammaker";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -20,8 +22,8 @@ type RequestOptions = { signal?: AbortSignal };
 type VideoMediaOptions = RequestOptions & { videos?: ReferenceVideo[]; audios?: ReferenceAudio[] };
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
-export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
-export type VideoGenerationTask = { id: string; provider: "openai" | "gemini" | "plugin" | "comfyui"; model: string };
+export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string; upstreamTaskId?: string };
+export type VideoGenerationTask = { id: string; provider: "openai" | "gemini" | "plugin" | "comfyui" | "dreammaker"; model: string; subApp?: string };
 type GeminiInlineData = { bytesBase64Encoded: string; mimeType: string };
 type GeminiVideoOperation = {
     name?: string;
@@ -29,7 +31,7 @@ type GeminiVideoOperation = {
     error?: { message?: string };
     response?: { generateVideoResponse?: { generatedSamples?: Array<{ video?: { uri?: string } }> } };
 };
-export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
+export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult; upstreamTaskId?: string } | { status: "failed"; error: string };
 
 /** Results for scripted (plugin) video models, which run their own create+poll in one shot at task creation. */
 const pluginVideoResults = new Map<string, VideoGenerationResult>();
@@ -50,13 +52,14 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 }
 
 export async function waitForVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
-    const maxAttempts = task.provider === "comfyui" ? 240 : 120;
+    const isLongCloudTask = task.provider === "comfyui" || task.provider === "dreammaker";
+    const maxAttempts = isLongCloudTask ? 360 : 120;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const state = await pollVideoGenerationTask(config, task, options);
-        if (state.status === "completed") return state.result;
+        if (state.status === "completed") return { ...state.result, ...(state.upstreamTaskId ? { upstreamTaskId: state.upstreamTaskId } : {}) };
         if (state.status === "failed") throw videoTaskFailed(state.error);
-        if (attempt === maxAttempts - 1) throw new Error(task.provider === "comfyui" ? "本轮查询已结束，云端任务可能仍在生成。任务编号已保留，请继续查询；不会重复生成。" : apiText("videoTimeout", { provider: "" }));
+        if (attempt === maxAttempts - 1) throw new Error(isLongCloudTask ? "本轮查询已结束，云端任务可能仍在生成。任务编号已保留，请继续查询；不会重复生成。" : apiText("videoTimeout", { provider: "" }));
         await delay(2500, options?.signal);
     }
     throw new Error(apiText("videoTimeout", { provider: "" }));
@@ -74,6 +77,13 @@ function videoTaskFailed(message: string) {
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     const selectedModel = (config.model || config.videoModel).trim();
+    if (isDreamMakerVideo(selectedModel)) {
+        const images = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
+        const videos = await Promise.all((options?.videos || []).map((video) => referenceMediaToFile(video, "ref.mp4", "invalidReferenceVideo", options)));
+        const audios = await Promise.all((options?.audios || []).map((audio) => referenceMediaToFile(audio, "ref.mp3", "invalidReferenceAudio", options)));
+        const task = await createDreamMakerVideoTask({ modelOption: selectedModel, prompt, config, images, videos, audios, signal: options?.signal });
+        return { id: task.id, provider: "dreammaker", model: selectedModel, subApp: task.subApp };
+    }
     if (isMiniMaxH3(selectedModel)) {
         if (boolConfig(config.videoWatermark, false)) throw new Error("当前 H3 工作流不添加水印，请关闭水印选项。");
         const images = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
@@ -131,6 +141,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
 }
 
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    if (task.provider === "dreammaker") return pollDreamMakerVideoTask(task.model, task.id, task.subApp, options?.signal);
     if (task.provider === "comfyui") return pollH3VideoTask(task.id, options?.signal);
     if (task.provider === "plugin") {
         const result = pluginVideoResults.get(task.id);

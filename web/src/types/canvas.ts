@@ -68,6 +68,22 @@ export type CanvasNodeMetadata = {
     imageSeed?: string;
     imageNegative?: string;
     imageResolution?: string;
+    dmMjQuality?: string;
+    dmMjHd?: string;
+    dmMjRaw?: string;
+    dmMjStylize?: string;
+    dmMjChaos?: string;
+    dmMjWeird?: string;
+    dmMjExp?: string;
+    dmMjTile?: string;
+    dmMjIw?: string;
+    dmMjMode?: string;
+    dmGptFormat?: string;
+    dmGptModeration?: string;
+    dmArkSizeTier?: string;
+    dmArkOptimizePrompt?: string;
+    dmArkWebSearch?: string;
+    dmArkLayerDecomposition?: string;
     count?: number;
     textCount?: number;
     texts?: CanvasNodeText[];
@@ -127,7 +143,9 @@ export type CanvasNodeMetadata = {
     bytes?: number;
     durationMs?: number;
     videoTaskId?: string;
-    videoTaskProvider?: "openai" | "gemini" | "comfyui";
+    videoTaskProvider?: "openai" | "gemini" | "comfyui" | "dreammaker";
+    videoTaskSubApp?: string;
+    dmDraftTaskId?: string;
     groupId?: string;
     interactive?: boolean; // Plugin node interaction/move state; see CanvasNodeDefinition.interactionToggle.
 };

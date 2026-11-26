@@ -5,6 +5,13 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- DreamMaker 生图与生视频节点接入及按模型规范优化提示词：在画布节点与生图/视频工作台分别验证 DreamMaker 生图（GPT Image 2.6/2.5、Midjourney 8.2/8.1、Niji 7、Seedream 5.5/5.0/4.5/4.0）与生视频（Seedance 2.5/2.5 Flash/2.0、MiniMax H3）：本地 Vite 代理从 `~/.dm-cli/config.yaml` 或 `DM_CLI_*` 环境变量签名 JWT、参考素材上传与签名直链下载、MJ 4 张批处理与 8.1 原生蒙版重绘、GPT Image Alpha 蒙版重绘与透明背景、Seedream 图层拆分多图回填与联网搜索、Seedance 图生视频跳过 `ratio`/`camera_fixed`、多模态参考/编辑/延长、`480p_draft` 草稿一键升 1080p/4K、刷新恢复查询，以及提示词面板/组装器/工作台按所选模型规范流式优化与撤销。
+
+- 生图 API 高可用增强（2026-11-08 已部署）：默认保守限流（`MAX_PENDING_TASKS=32`、`MAX_REMBG_CONCURRENCY=4`、`MAX_UPLOAD_MB=20`，超限 429 + `Retry-After`）、每任务锁、生图/抠图取消接口、抠图任务持久化与 `wait=false` 异步模式、`recover/watchdog.sh` 进程自动重启。已实测 3 并发为 1 运行 + 2 排队、4K 任务取消后队列清空、临时 `MAX_PENDING_TASKS=1` 时第二个提交返回 429、杀掉 API 后 watchdog 自动拉起、异步抠图表任务可查询并下载 RGBA。仍需人工验收：Agent 真实高并发下的 429 退避与重试、watchdog 对 ComfyUI 进程的重启、API/容器重启后 `queued/running` 抠图任务的恢复，以及 1024 下 `count` 大于 8 的显存余量（实测 15 张峰值 32.08G/32.6G，建议不超过 4–8 张）。
+- 云端恢复与清理（2026-11-08）：新增 `services/comfyui-image-api/recover/` 恢复手册、`deploy.sh` 全量重建脚本和 `cleanup.sh` 清理脚本。已实测冷杀 ComfyUI/API 后 `start-services.sh` 能恢复，`health?deep=true` 正常，BiRefNet 抠图仍返回 RGBA；已实测因自定义节点覆盖 `nodes.py` 导致启动失败后可用手册恢复官方文件。仍需人工验收：完整容器重启后的自动恢复流程、`cleanup.sh --apply` 的真实删除效果，以及是否启用每日自动清理（当前默认 dry-run，未自动删除任何文件）。
+- 生图 API 抠图接口（2026-11-08 已部署）：`POST /v1/background-removal` 基于 BiRefNet General，直接返回带 Alpha 的透明 PNG，支持 model/device/dtype/timeout 参数；已用真实人像实测，输出 RGBA、透明像素与边缘正常。仍需人工验收不同主体（半透明发丝、薄纱、宠物、商品）、大批量并发、ComfyUI 队列繁忙时的等待表现，以及容器重建后的节点/模型恢复。
+- ComfyUI 生图 HTTP API（2026-11-08 已部署）：`services/comfyui-image-api` 在新机 8192 端口提供异步提交/轮询/图片下载，支持 1K/1.5K/2K/4K、显式宽高、最多 10 张参考图编辑、跟随原图、步数/CFG/种子/张数、SeedVR2 自定义超分长边，自带 `/docs` 与 `/openapi.json`。已实测 1024 文生图、参考图编辑（跟随原图）、4K（4096×2304）和图片下载；仍需人工验收第三方服务接入、`count>1`、长任务轮询与容器重建后 `start.sh` 恢复。
+- Qwen Image 2.1 云端迁移（2026-11-08）：旧机 dep457-daixinliang-generate-test 已下线（Jupyter 与 ComfyUI 均 404），新机 dep457-hzlizhaoming-genearate（aliyun-hangzhou-2，RTX 5090 32G）已重装 ComfyUI 0.44.2 + PyTorch 2.9.1+cu128 + Python 3.12 + Node 22，Qwen 2.1 与 SeedVR2 权重重新下载；经 `/proxy/8188` 实测 1024 文生图（约 14 秒）、参考图编辑、4K SeedVR2（4096×2304，约 30 秒）均成功。仍需人工验收画布端 1K/1.5K/2K/4K 与刷新恢复；容器重建后需重跑 `bash /home/hzlizhaoming/ComfyUI/start.sh`（源码、venv 与模型在 NFS 持久盘保留）。MiniMax H3 视频权重未迁移到新机，视频技能仍指向旧机。
 - 已保存模型失效：画布节点已选模型后，移除所属渠道或该模型，并保留另一个默认视频模型。生成、重试及未完成视频恢复应保留失效模型选择并打开配置，不能向默认模型或第一个渠道发送请求；明确重新选择有效模型后才可生成。同渠道仅换 API Key 应保留原模型；配置节点从有效图片模型切换到视频类型时仍应使用视频默认模型。
 
 - 画布图片预览：画布图片节点、左侧元素列表、节点参考栏、我的资产卡片、资产选择弹窗、生图工作台的结果卡片与历史缩略图、生图和视频工作台的参考图都使用最大边长 768px 的缩略图渲染，使图片较多时不再反复解码原图。缩略图只存在本地，画布数据、资产数据、生图历史、导出包和 WebDAV 同步里都不应出现缩略图内容，删除图片或用不到时也应一并清掉。点开大图、编辑、下载、导出和生成参考图必须继续使用原始图片；图片本身不超过 768px、只有远端地址（跨域读不到本地内容）、或使用自定义封面时应回退原图。
