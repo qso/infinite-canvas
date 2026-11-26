@@ -13,6 +13,7 @@ import { useAgentChatStore } from "@workbench/stores/use-agent-chat-store";
 import { canvasThemes } from "@workbench/lib/canvas-theme";
 import { CANVAS_AGENT_PANEL_MOTION_MS, useAgentStore } from "@workbench/stores/use-agent-store";
 import { useThemeStore } from "@workbench/stores/use-theme-store";
+import { isDshEmbed } from "@workbench/lib/embed-mode";
 import "./agent-panel.css";
 
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -49,7 +50,7 @@ export function AgentPanel() {
         window.addEventListener("pointerup", onUp);
     };
 
-    if (!projectId) return null;
+    if (!projectId || isDshEmbed()) return null;
     return (
         <motion.div
             className="relative z-[70] flex h-full max-w-full shrink-0"

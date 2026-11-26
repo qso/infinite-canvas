@@ -15,10 +15,10 @@ export async function runCli(web: LocalWeb, entryUrl: string) {
     try {
         const { values, positionals } = parseArgs({
             allowPositionals: true,
-            options: { registry: { type: "string" }, "data-dir": { type: "string", default: path.join(homedir(), ".infinite-canvas", "workspace") }, port: { type: "string", default: String(DEFAULT_PORT) }, open: { type: "boolean" }, "skip-plugins": { type: "boolean" }, help: { type: "boolean", short: "h" }, debug: { type: "boolean" } },
+            options: { registry: { type: "string" }, "data-dir": { type: "string", default: path.join(homedir(), ".infinite-canvas", "workspace") }, "shared-config-dir": { type: "string" }, port: { type: "string", default: String(DEFAULT_PORT) }, open: { type: "boolean" }, "skip-plugins": { type: "boolean" }, "no-save-config": { type: "boolean" }, help: { type: "boolean", short: "h" }, debug: { type: "boolean" } },
         });
         if (values.help) {
-            console.log("用法：infinite-canvas serve [--data-dir <目录>] [--port <端口>] [--open] [--skip-plugins]\n      infinite-canvas mcp\n      infinite-canvas plugin add|update|remove|enable|disable|list|registry\n\nserve 启动画布并把业务数据保存在目录中；mcp 连接已启动的服务。\n--skip-plugins 本次跳过第三方插件启动，保留数据和启用选择，可在插件设置中逐个重新启用。\n需要 Node.js 22 或更高版本。按 Ctrl+C 停止服务。");
+            console.log("用法：infinite-canvas serve [--data-dir <目录>] [--shared-config-dir <目录>] [--port <端口>] [--open] [--skip-plugins]\n      infinite-canvas mcp\n      infinite-canvas plugin add|update|remove|enable|disable|list|registry\n\nserve 启动画布并把业务数据保存在目录中；--shared-config-dir 可把渠道凭据、偏好与插件目录共享到公共目录。\nmcp 连接已启动的服务。\n--skip-plugins 本次跳过第三方插件启动，保留数据和启用选择，可在插件设置中逐个重新启用。\n需要 Node.js 22 或更高版本。按 Ctrl+C 停止服务。");
         } else if (positionals[0] === "plugin") {
             await runPluginCommand(positionals.slice(1), path.resolve(values["data-dir"]), values.registry);
         } else if (positionals.length === 1 && positionals[0] === "mcp") {
@@ -28,13 +28,17 @@ export async function runCli(web: LocalWeb, entryUrl: string) {
             if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("INVALID_PORT");
             const development = entryUrl.endsWith(".ts");
             const dataDirectory = path.resolve(values["data-dir"]);
+            const sharedConfigDirectory = values["shared-config-dir"]?.trim() ? path.resolve(values["shared-config-dir"]) : undefined;
             const mcp = development ? { command: process.execPath, args: ["--import", import.meta.resolve("tsx"), fileURLToPath(entryUrl), "mcp"] } : { command: process.execPath, args: [fileURLToPath(entryUrl), "mcp"] };
             const urlFile = path.join(dataDirectory, ".canvas.url");
-            const service = await startLocalServer({ dataDirectory, web, port, skipThirdPartyPlugins: values["skip-plugins"], mcp: development ? mcp : undefined }).catch(async (error) => {
+            const service = await startLocalServer({ dataDirectory, sharedConfigDirectory, web, port, skipThirdPartyPlugins: values["skip-plugins"], mcp: development ? mcp : undefined }).catch(async (error) => {
                 // 同一目录已有服务在运行时直接复用它，不再启动第二个进程。
                 if (desktop || !(error instanceof StorageError && error.code === "WORKSPACE_LOCKED")) throw error;
                 const url = await readFile(urlFile, "utf8").catch(() => "");
-                if (!url || !await fetch(`${url}/health`).then((response) => response.ok, () => false)) throw error;
+                if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(url)) throw error;
+                const manifest = JSON.parse(await readFile(path.join(dataDirectory, "workspace.json"), "utf8"));
+                const config = await fetch(`${url}/config`, { signal: AbortSignal.timeout(2500) }).then(response => response.json()).catch(() => null);
+                if (!manifest.id || config?.workspaceId !== manifest.id) throw error;
                 return url;
             });
             if (typeof service === "string") {
@@ -44,7 +48,7 @@ export async function runCli(web: LocalWeb, entryUrl: string) {
             }
             try {
                 await writeFile(urlFile, service.url);
-                saveConfig({ url: service.url });
+                if (!values["no-save-config"]) saveConfig({ url: service.url });
             } catch (error) {
                 await service.close();
                 throw error;

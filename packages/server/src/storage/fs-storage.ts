@@ -1,3 +1,4 @@
+import { ProjectEditors } from "../canvas/project-editors.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, createWriteStream } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, rm, stat, statfs, writeFile, type FileHandle } from "node:fs/promises";
@@ -61,26 +62,36 @@ async function readRows(directory: string) {
     return Promise.all(names.map(async (name) => ({ base: path.join(directory, name.slice(0, -5)), row: JSON.parse(await readFile(path.join(directory, name), "utf8")) as StorageRecord })));
 }
 
+const sharedCollections = new Set(["privateChannels", "privateConfig", "scripts", "preferences"]);
+
 export class FsStorage {
+    readonly editors = new ProjectEditors();
     private queue: Promise<unknown> = Promise.resolve();
     private listeners = new Set<(event: StorageChange) => void>();
     private closing = false;
-    private constructor(readonly directory: string, private readonly lock: FileHandle) {}
+    private constructor(readonly directory: string, private readonly lock: FileHandle, readonly workspaceId: string, readonly sharedConfigDirectory?: string) {}
 
-    static async open(directory: string) {
+    static async open(directory: string, options?: { sharedConfigDirectory?: string }) {
         await mkdir(directory, { recursive: true, mode: 0o700 });
+        const sharedConfigDirectory = options?.sharedConfigDirectory ? path.resolve(options.sharedConfigDirectory) : undefined;
+        if (sharedConfigDirectory) {
+            await mkdir(sharedConfigDirectory, { recursive: true, mode: 0o700 });
+        }
         const lock = await open(path.join(directory, ".canvas.lock"), "a+", 0o600);
         try {
             if (!tryLock(lock.fd)) throw new StorageError("WORKSPACE_LOCKED");
             const manifest = path.join(directory, "workspace.json");
+            let id: string;
             try {
                 const data = JSON.parse(await readFile(manifest, "utf8"));
-                if (data.schemaVersion !== 1) throw new StorageError("STORAGE_INVALID");
+                if (data.schemaVersion !== 1 || typeof data.id !== "string" || !data.id) throw new StorageError("STORAGE_INVALID");
+                id = data.id;
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-                await writeFile(manifest, JSON.stringify({ schemaVersion: 1, id: randomUUID() }, null, 2), { mode: 0o600 });
+                id = randomUUID();
+                await writeFile(manifest, JSON.stringify({ schemaVersion: 1, id }, null, 2), { mode: 0o600 });
             }
-            return new FsStorage(directory, lock);
+            return new FsStorage(directory, lock, id, sharedConfigDirectory);
         } catch (error) {
             await lock.close();
             throw error;
@@ -90,7 +101,8 @@ export class FsStorage {
     private collectionPath(collection: string) {
         const relative = collection.startsWith("plugin:") ? `${pluginData}/${safeName(collection.slice("plugin:".length))}` : collection.startsWith("plugin-files:") ? `${pluginFiles}/${safeName(collection.slice("plugin-files:".length))}` : directories[collection];
         if (!relative) throw new StorageError("STORAGE_INVALID");
-        return path.join(this.directory, relative);
+        const base = this.sharedConfigDirectory && sharedCollections.has(collection) ? this.sharedConfigDirectory : this.directory;
+        return path.join(base, relative);
     }
 
     private recordPath(collection: string, key: string) {
@@ -207,6 +219,12 @@ export class FsStorage {
         return pending;
     }
 
+    connectEditor(...args: Parameters<ProjectEditors["connect"]>) {
+        return this.commit(async () => {
+            if (args[0].readyState === args[0].OPEN) this.editors.connect(...args);
+        });
+    }
+
     private async replace(collection: string, record: StorageRecord, clientId: string) {
         await writeDiskJson(this.recordPath(collection, record.key), record);
         this.notify(collection, record.key, clientId);
@@ -304,6 +322,7 @@ export class FsStorage {
 
     deleteProject(key: string, deletion: ProjectDeletion, clientId: string) {
         return this.commit(async () => {
+            if (!this.editors.permits(key, clientId)) throw new StorageError("WORKSPACE_LOCKED");
             if (!projectDeletionSchema.safeParse(deletion).success || (deletion.expectedDocument && deletion.expectedDocument.id !== key)) throw new StorageError("STORAGE_INVALID");
             const current = await this.read<CanvasDocument>("projects", key);
             if (deletion.deletedAt !== undefined) {
@@ -325,6 +344,7 @@ export class FsStorage {
         return this.commit(async () => {
             let updatedAt: string | undefined;
             if (collection === "projects" && value !== null) {
+                if (!this.editors.permits(key, clientId)) throw new StorageError("WORKSPACE_LOCKED");
                 const result = canvasDocumentSchema.safeParse(value);
                 if (!result.success || result.data.id !== key) throw new StorageError("STORAGE_INVALID");
                 value = serializeCanvasDocument(value as CanvasDocument);

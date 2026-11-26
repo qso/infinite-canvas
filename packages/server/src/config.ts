@@ -8,7 +8,19 @@ export const CONFIG_FILE = path.join(CONFIG_DIR, "canvas-mcp.json");
 export const VERSION = readPackageVersion();
 export const AGENT_PROMPT = fs.readFileSync(new URL("../agent-instructions.md", import.meta.url), "utf8");
 
-export type ServerConfig = { url: string; mcp?: { command: string; args: string[] } };
+export type ServerCapabilities = {
+    projectEditors?: boolean;
+    dshEmbed: boolean;
+    clientIdParam: boolean;
+    sharedConfigDir: boolean;
+    privateProxies: boolean;
+};
+
+export type ServerConfig = {
+    url: string;
+    mcp?: { command: string; args: string[] };
+    capabilities?: ServerCapabilities;
+};
 
 /** 读取本地 本地服务配置，不存在时生成默认配置。 */
 export function loadConfig(create = false): ServerConfig {

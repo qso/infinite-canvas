@@ -11,8 +11,10 @@ import { saveArchivePreferences } from "./browser-archive";
 import { assetLibraryKey } from "@infinite-canvas/shared/sync-records";
 import { openLocalSocket } from "@workbench/lib/local-socket";
 
+export const storagePageId = crypto.randomUUID();
+
 export function createHttpStorage(): StorageAdapter {
-    const clientId = crypto.randomUUID();
+    const clientId = storagePageId;
     const listeners = new Map<string, Set<(key: string | null) => void>>();
     const collections = new Map<string, StorageCollection>();
     const writes = new Map<string, Promise<unknown>>();

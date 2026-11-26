@@ -18,6 +18,7 @@ export function useAgentBridge({ session, title, setContextMenu }: AgentBridgePa
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(() => ({ projectId: session.projectId, title, nodes: snapshot.nodes, connections: snapshot.connections, selectedNodeIds: snapshot.selection.nodeIds, viewport: snapshot.viewport }), [session, snapshot, title]);
     const applyAgentOps = useCallback(async (ops: CanvasAgentOp[] = []) => {
         const snapshot = await executeCanvasAgentOps(session, title, ops);
+        if (ops.length) await session.flush();
         session.signal.throwIfAborted();
         setContextMenu(null);
         return snapshot;

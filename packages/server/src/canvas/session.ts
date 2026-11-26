@@ -21,7 +21,17 @@ export class CanvasSession {
     private focusSequence = 0;
 
     health() {
-        return { ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, clients: this.clients.size, hasCanvas: this.states.has(this.activeClientId) };
+        const clientStates: Record<string, CanvasPresence | null> = {};
+        for (const clientId of this.clients.keys()) {
+            clientStates[clientId] = this.states.get(clientId) ?? null;
+        }
+        return {
+            ok: true,
+            protocolVersion: AGENT_PROTOCOL_VERSION,
+            clients: this.clients.size,
+            hasCanvas: this.states.has(this.activeClientId),
+            clientStates,
+        };
     }
 
     openEvents(clientId: string, socket: WebSocket) {

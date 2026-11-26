@@ -4,7 +4,7 @@ import { createBrowserRouter, Outlet } from "react-router-dom";
 import UserLayout from "@infinite-canvas/workbench/layouts/user-layout";
 import AssetsPage from "@infinite-canvas/workbench/pages/assets";
 import CanvasPage from "@infinite-canvas/workbench/pages/canvas";
-import CanvasProjectPage from "@infinite-canvas/workbench/pages/canvas/project";
+import CanvasProjectPage from "@workbench/pages/canvas/local-project";
 import CreatePage from "@infinite-canvas/workbench/pages/create";
 import CreateHistoryPage from "@infinite-canvas/workbench/pages/create/history";
 import HomePage from "@infinite-canvas/workbench/pages/home";

@@ -49,8 +49,8 @@ export function createCanvasHttpApp(config: ServerConfig, session: CanvasSession
     if (options?.plugins) mountPlugins(app, options.plugins);
     if (options) mountModels(app, options.storage, options.tasks ?? new ModelTasks(options.storage));
     if (options) mountWorkspaceConfig(app, options.storage);
-    app.get("/health", (_req, res) => res.json(session.health()));
-    app.get("/config", (_req, res) => res.json({ ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, url: config.url, mcp: config.mcp }));
+    app.get("/health", (_req, res) => res.json({ ...session.health(), readOnlyClients: options?.storage.editors.readOnlyClients }));
+    app.get("/config", (_req, res) => res.json({ ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, workspaceId: options?.storage.workspaceId, url: config.url, mcp: config.mcp, capabilities: config.capabilities }));
     app.post("/canvas/state", (req, res) => {
         session.updateState(req.query.clientId as string, req.body.snapshot, req.body.pluginTools === true);
         res.json({ ok: true });
@@ -102,14 +102,21 @@ export function mountEventSockets(http: Server, session: CanvasSession, storage:
     const sockets = new WebSocketServer({ noServer: true });
     http.on("upgrade", (req, socket, head) => {
         const url = new URL(req.url!, "http://127.0.0.1");
-        if (url.pathname !== "/events" && url.pathname !== "/api/storage/events") return;
+        if (url.pathname !== "/events" && url.pathname !== "/api/storage/events" && url.pathname !== "/canvas/editor") return;
         // WebSocket 不受浏览器跨域限制，必须只接受本机地址和同源页面。
         if (!["127.0.0.1", "localhost", "[::1]"].includes(new URL(`http://${req.headers.host}`).hostname) || req.headers.origin !== `http://${req.headers.host}`) return void socket.destroy();
         sockets.handleUpgrade(req, socket, head, (client) => {
+            if (url.pathname === "/canvas/editor") {
+                const project = url.searchParams.get("project");
+                const writer = url.searchParams.get("writer");
+                if (!project || !writer) return void client.close(1008);
+                return void storage.connectEditor(client, project, writer, url.searchParams.get("exclusive") === "1", url.searchParams.get("clientId")).catch(() => client.close(1011));
+            }
             if (url.pathname === "/api/storage/events") return watchStorage(client, storage);
             const clientId = url.searchParams.get("clientId");
             if (!clientId) return void client.close(1008);
             session.openEvents(clientId, client);
         });
     });
+    return () => { for (const client of sockets.clients) client.terminate(); sockets.close(); };
 }

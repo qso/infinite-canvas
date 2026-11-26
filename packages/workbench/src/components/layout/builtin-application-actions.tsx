@@ -9,6 +9,7 @@ import { builtinPlugin } from "@workbench/lib/plugins/registry";
 import { useConfigStore } from "@workbench/stores/use-config-store";
 import { useAgentStore } from "@workbench/stores/use-agent-store";
 import { useThemeStore } from "@workbench/stores/use-theme-store";
+import { isDshEmbed } from "@workbench/lib/embed-mode";
 import { GitHubLink } from "./github-link";
 import { VersionReleaseModal } from "./version-release-modal";
 
@@ -42,7 +43,7 @@ export function registerBuiltinApplicationActions() {
                     ...items,
                     ...(canvasScope ? [
                         { id: "builtin:shortcuts", type: "action" as const, title: "快捷键", icon: <Keyboard className="size-4" />, run: () => hostActions.canvasOpenShortcuts(undefined, ctx.signal) },
-                        { id: "builtin:agent", type: "content" as const, title: "Agent", content: <CanvasAgentAction /> },
+                        ...(!isDshEmbed() ? [{ id: "builtin:agent", type: "content" as const, title: "Agent", content: <CanvasAgentAction /> }] : []),
                     ] : []),
                 ];
             },

@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { storage } from "@workbench/services/storage/runtime";
+import { resolveCanvasMcpClientId } from "@workbench/lib/embed-mode";
 
-export const canvasMcpClientId = crypto.randomUUID();
+export const canvasMcpClientId = resolveCanvasMcpClientId();
 
 /** 只有本地服务提供的网页能被外部 Agent 操作，连接同源服务。 */
 type CanvasMcpStore = {

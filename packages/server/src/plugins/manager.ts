@@ -39,7 +39,7 @@ export class PluginManager implements PluginAdapter {
     private recovered?: Promise<void>;
     constructor(private storage: FsStorage, private skipThirdPartyPlugins = false) {}
 
-    private get root() { return path.join(this.storage.directory, "plugins"); }
+    private get root() { return path.join(this.storage.sharedConfigDirectory ?? this.storage.directory, "plugins"); }
 
     private async state(): Promise<ManagerState> {
         const saved = (await this.storage.read<ManagerState>("privateConfig", "plugin-manager"))?.value;
