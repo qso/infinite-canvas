@@ -1,3 +1,4 @@
+import "../lib/ensure-random-uuid";
 import { initializePlugins } from "../services/plugins/runtime";
 import { createBrowserStorage } from "../services/storage/browser";
 import { prepareBrowserStorage } from "../services/storage/browser-stores";

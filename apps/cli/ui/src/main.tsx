@@ -1,3 +1,4 @@
+import "@infinite-canvas/workbench/lib/ensure-random-uuid";
 import { startLocal } from "@infinite-canvas/workbench/startup/local";
 
 void startLocal().then(() => import("./bootstrap")).catch((error) => {

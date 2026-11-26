@@ -1,3 +1,4 @@
+import "@infinite-canvas/workbench/lib/ensure-random-uuid";
 import { startBrowser } from "@infinite-canvas/workbench/startup/browser";
 
 void startBrowser().then(() => import("./bootstrap")).catch((error) => {
