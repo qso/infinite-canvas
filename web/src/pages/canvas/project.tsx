@@ -8,6 +8,8 @@ import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { waitForQwenImageTasks } from "@/services/api/comfyui-qwen";
+import { getDreamMakerImageSpec, isDreamMakerArk, isDreamMakerImage, isDreamMakerMj } from "@/constant/dreammaker";
+import { promoteDreamMakerDraft, waitForDreamMakerImageTask } from "@/services/api/dreammaker";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createMusicAnalysis, createMusicGenerationTask, getMusicGenerationContent, getMusicGenerationScore, MusicApiError, uploadMusicReference, waitForMusicAnalysis, waitForMusicGenerationTask } from "@/services/api/music";
 import { MUSIC_ENDPOINT, MUSIC_MODEL, type MusicAnalysisRequest } from "@/constant/music";
@@ -655,10 +657,11 @@ function InfiniteCanvasPage() {
             const task = await createVideoGenerationTask(config, prompt, images, { signal, videos, audios });
             if (task.provider !== "plugin") {
                 const provider = task.provider;
-                setNodes((prev) => prev.map((item) => (item.id === nodeId ? { ...item, metadata: { ...item.metadata, videoTaskId: task.id, videoTaskProvider: provider, model: config.model } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === nodeId ? { ...item, metadata: { ...item.metadata, videoTaskId: task.id, videoTaskProvider: provider, videoTaskSubApp: task.subApp, model: config.model } } : item)));
             }
-            const video = await storeGeneratedVideo(await waitForVideoGenerationTask(config, task, { signal }));
-            setNodes((prev) => prev.map((item) => (item.id === nodeId ? applyGeneratedVideo(item, video, { prompt, model: config.model, ...extra }) : item)));
+            const videoResult = await waitForVideoGenerationTask(config, task, { signal });
+            const video = await storeGeneratedVideo(videoResult);
+            setNodes((prev) => prev.map((item) => (item.id === nodeId ? applyGeneratedVideo(item, video, { prompt, model: config.model, dmDraftTaskId: videoResult.upstreamTaskId, ...extra }) : item)));
         },
         [],
     );
@@ -682,13 +685,15 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(node.id);
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
                 controller = startGenerationRequest(node.id, node.id, node.id);
-                const video = await storeGeneratedVideo(await waitForVideoGenerationTask(generationConfig, { id: taskId, provider: node.metadata?.videoTaskProvider || "openai", model: generationConfig.model }, { signal: controller.signal }));
+                const videoResult = await waitForVideoGenerationTask(generationConfig, { id: taskId, provider: node.metadata?.videoTaskProvider || "openai", model: generationConfig.model, subApp: node.metadata?.videoTaskSubApp }, { signal: controller.signal });
+                const video = await storeGeneratedVideo(videoResult);
                 setNodes((prev) =>
                     prev.map((item) =>
                         item.id === node.id
                             ? applyGeneratedVideo(item, video, {
                                   prompt: item.metadata?.prompt,
                                   model: generationConfig.model,
+                                  dmDraftTaskId: videoResult.upstreamTaskId,
                                   size: generationConfig.size,
                                   seconds: generationConfig.videoSeconds,
                                   vquality: generationConfig.vquality,
@@ -781,10 +786,26 @@ function InfiniteCanvasPage() {
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
                 controller = startGenerationRequest(node.id, node.id, node.id);
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+                const isDreamMaker = isDreamMakerImage(node.metadata?.model || "");
+                const dreamMakerTaskCache = new Map<string, Promise<Array<{ id: string; dataUrl: string }>>>();
                 await Promise.all(
                     slots.map(async (slot) => {
                         try {
-                            const [image] = await waitForQwenImageTasks([slot.taskId!], controller!.signal);
+                            let image: { id: string; dataUrl: string };
+                            if (isDreamMaker) {
+                                const taskKey = slot.taskId!;
+                                let promise = dreamMakerTaskCache.get(taskKey);
+                                if (!promise) {
+                                    promise = waitForDreamMakerImageTask(taskKey, controller!.signal, node.metadata?.model);
+                                    dreamMakerTaskCache.set(taskKey, promise);
+                                }
+                                const items = await promise;
+                                const siblingSlots = slots.filter((s) => s.taskId === taskKey);
+                                const idx = Math.max(0, siblingSlots.indexOf(slot));
+                                image = items[idx] || items[0];
+                            } else {
+                                [image] = await waitForQwenImageTasks([slot.taskId!], controller!.signal);
+                            }
                             const uploaded = await uploadImage(image.dataUrl, { signal: controller!.signal });
                             applyGeneratedImageSlot(node.id, slot.id, uploaded, imageConfig.width, imageConfig.height);
                         } catch (error) {
@@ -2454,14 +2475,17 @@ function InfiniteCanvasPage() {
                 return;
             }
             const userPrompt = payload.prompt.trim();
-            const prompt = t("canvas.projectPage.maskPrompt", { source: imageReferenceLabel(0), mask: imageReferenceLabel(1), prompt: userPrompt });
+            const dmSpec = getDreamMakerImageSpec(generationConfig.model);
+            const useNativeGptMask = dmSpec?.family === "gpt";
+            const useNativeMjMask = dmSpec?.family === "mj" && Boolean(dmSpec.supportsMaskPaint);
+            const prompt = useNativeGptMask || useNativeMjMask ? userPrompt : t("canvas.projectPage.maskPrompt", { source: imageReferenceLabel(0), mask: imageReferenceLabel(1), prompt: userPrompt });
             setMaskEditNodeId(null);
             const maskImage = await uploadImage(payload.maskDataUrl);
             const maskNodeId = nanoid();
             const childId = nanoid();
             const source = { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
             const maskSource = { id: maskNodeId, name: "mask.png", type: maskImage.mimeType || "image/png", dataUrl: maskImage.url, storageKey: maskImage.storageKey };
-            const references = [source, maskSource];
+            const references = useNativeGptMask || useNativeMjMask ? [source] : [source, maskSource];
             const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, references);
             const childMetadata = payload.generate ? { prompt, status: NODE_STATUS_LOADING, ...generationMetadata } : { prompt };
             setNodes((prev) => [
@@ -2497,7 +2521,11 @@ function InfiniteCanvasPage() {
             setRunningNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(generationConfig, prompt, references, { signal: controller.signal }).then((items) => items[0]);
+                const image = await requestEdit(generationConfig, prompt, references, {
+                    signal: controller.signal,
+                    ...(useNativeGptMask ? { maskDataUrl: payload.alphaMaskDataUrl } : {}),
+                    ...(useNativeMjMask ? { bwMaskDataUrl: payload.bwMaskDataUrl } : {}),
+                }).then((items) => items[0]);
                 const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
@@ -2850,7 +2878,10 @@ function InfiniteCanvasPage() {
 
             try {
                 if (mode === "image") {
-                    const count = getGenerationCount(generationConfig.count);
+                    const rawCount = getGenerationCount(generationConfig.count);
+                    const isMjBatch = isDreamMakerMj(generationConfig.model);
+                    const isArkLayerDecomp = isDreamMakerArk(generationConfig.model) && generationConfig.dmArkLayerDecomposition === "true";
+                    const count = isMjBatch ? Math.max(4, Math.min(12, Math.ceil(rawCount / 4) * 4)) : rawCount;
                     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
                     const isImageNode = sourceNode?.type === CanvasNodeType.Image;
                     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;
@@ -2930,28 +2961,111 @@ function InfiniteCanvasPage() {
                     let hasSuccess = false;
                     let hasFailure = false;
                     let firstError = "";
-                    await Promise.all(
-                        imageIds.map(async (imageId) => {
-                            try {
-                                const taskOptions = { signal: controller.signal, onImageTaskIds: (ids: string[]) => attachImageSlotTask(rootId, imageId, ids) };
-                                const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, taskOptions).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, taskOptions).then((items) => items[0]);
-                                const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
-                                applyGeneratedImageSlot(rootId, imageId, uploaded, imageConfig.width, imageConfig.height);
-                                hasSuccess = true;
-                                if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
-                                return true;
-                            } catch (error) {
-                                if (isGenerationCanceled(error)) return false;
-                                const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
-                                if (!firstError) firstError = errorDetails;
-                                hasFailure = true;
-                                setNodes((prev) => prev.map((node) => (node.id === rootId ? { ...node, metadata: { ...node.metadata, images: node.metadata?.images?.map((image) => (image.id === imageId ? { ...image, status: NODE_STATUS_ERROR, errorDetails } : image)) } } : node)));
+                    if (isMjBatch) {
+                        const chunks: string[][] = [];
+                        for (let i = 0; i < imageIds.length; i += 4) chunks.push(imageIds.slice(i, i + 4));
+                        await Promise.all(
+                            chunks.map(async (chunk) => {
+                                try {
+                                    const taskOptions = {
+                                        signal: controller.signal,
+                                        onImageTaskIds: (ids: string[]) => {
+                                            const tid = ids[0];
+                                            if (!tid) return;
+                                            chunk.forEach((slotId) => attachImageSlotTask(rootId, slotId, [tid]));
+                                        },
+                                    };
+                                    const items = referenceImages.length
+                                        ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, taskOptions)
+                                        : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, taskOptions);
+                                    await Promise.all(
+                                        chunk.map(async (slotId, idx) => {
+                                            const image = items[idx];
+                                            if (!image) return;
+                                            const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
+                                            applyGeneratedImageSlot(rootId, slotId, uploaded, imageConfig.width, imageConfig.height);
+                                            hasSuccess = true;
+                                        }),
+                                    );
+                                    if (hasSuccess && isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
+                                } catch (error) {
+                                    if (isGenerationCanceled(error)) return;
+                                    const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                                    if (!firstError) firstError = errorDetails;
+                                    hasFailure = true;
+                                    setNodes((prev) =>
+                                        prev.map((node) =>
+                                            node.id === rootId
+                                                ? { ...node, metadata: { ...node.metadata, images: node.metadata?.images?.map((image) => (chunk.includes(image.id) ? { ...image, status: NODE_STATUS_ERROR, errorDetails } : image)) } }
+                                                : node,
+                                        ),
+                                    );
+                                }
+                            }),
+                        );
+                    } else if (isArkLayerDecomp && referenceImages.length === 1 && count === 1) {
+                        const slotId = imageIds[0];
+                        try {
+                            const taskOptions = { signal: controller.signal, onImageTaskIds: (ids: string[]) => attachImageSlotTask(rootId, slotId, ids) };
+                            const items = await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, taskOptions);
+                            const extraSlots = items.slice(1).map(() => nanoid());
+                            if (extraSlots.length) {
+                                setNodes((prev) =>
+                                    prev.map((node) =>
+                                        node.id === rootId
+                                            ? {
+                                                  ...node,
+                                                  metadata: {
+                                                      ...node.metadata,
+                                                      count: items.length,
+                                                      images: [...(node.metadata?.images || []), ...extraSlots.map((id) => ({ id, status: NODE_STATUS_LOADING, content: "", naturalWidth: 0, naturalHeight: 0, bytes: 0, mimeType: "" }))],
+                                                  },
+                                              }
+                                            : node,
+                                    ),
+                                );
                             }
-                            return false;
-                        }),
-                    );
+                            const allSlots = [slotId, ...extraSlots];
+                            await Promise.all(
+                                items.map(async (image, idx) => {
+                                    const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
+                                    applyGeneratedImageSlot(rootId, allSlots[idx], uploaded, imageConfig.width, imageConfig.height);
+                                    hasSuccess = true;
+                                }),
+                            );
+                            if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
+                        } catch (error) {
+                            if (!isGenerationCanceled(error)) {
+                                const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                                firstError = errorDetails;
+                                hasFailure = true;
+                                setNodes((prev) => prev.map((node) => (node.id === rootId ? { ...node, metadata: { ...node.metadata, images: node.metadata?.images?.map((image) => (image.id === slotId ? { ...image, status: NODE_STATUS_ERROR, errorDetails } : image)) } } : node)));
+                            }
+                        }
+                    } else {
+                        await Promise.all(
+                            imageIds.map(async (imageId) => {
+                                try {
+                                    const taskOptions = { signal: controller.signal, onImageTaskIds: (ids: string[]) => attachImageSlotTask(rootId, imageId, ids) };
+                                    const image = referenceImages.length
+                                        ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, taskOptions).then((items) => items[0])
+                                        : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, taskOptions).then((items) => items[0]);
+                                    const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
+                                    applyGeneratedImageSlot(rootId, imageId, uploaded, imageConfig.width, imageConfig.height);
+                                    hasSuccess = true;
+                                    if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
+                                    return true;
+                                } catch (error) {
+                                    if (isGenerationCanceled(error)) return false;
+                                    const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                                    if (!firstError) firstError = errorDetails;
+                                    hasFailure = true;
+                                    setNodes((prev) => prev.map((node) => (node.id === rootId ? { ...node, metadata: { ...node.metadata, images: node.metadata?.images?.map((image) => (image.id === imageId ? { ...image, status: NODE_STATUS_ERROR, errorDetails } : image)) } } : node)));
+                                }
+                                return false;
+                            }),
+                        );
+                    }
                     if (rootId !== nodeId) finishGenerationRequest(rootId, controller);
                     if (controller.signal.aborted) {
                         setNodes((prev) => prev.map((node) => (node.id === nodeId && isConfigNode && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node)));
@@ -3522,6 +3636,57 @@ function InfiniteCanvasPage() {
         }
     }, [acousticEditNodeId, acousticRunning, acousticValues, finishGenerationRequest, message, setConnections, setNodes, startGenerationRequest, t]);
 
+    const promoteVideoDraftNode = useCallback(
+        async (node: CanvasNodeData, targetResolution: "1080p" | "4k") => {
+            const draftTaskId = node.metadata?.dmDraftTaskId;
+            if (!draftTaskId) return;
+            const childId = nanoid();
+            const generationConfig = buildGenerationConfig(effectiveConfig, node, "video");
+            const vquality = targetResolution === "4k" ? "2160" : "1080";
+            const childNode: CanvasNodeData = {
+                id: childId,
+                type: CanvasNodeType.Video,
+                title: `${node.title || "Seedance"} · ${targetResolution.toUpperCase()}`,
+                position: { x: node.position.x + node.width + 96, y: node.position.y },
+                width: node.width,
+                height: node.height,
+                metadata: {
+                    prompt: node.metadata?.prompt,
+                    status: NODE_STATUS_LOADING,
+                    model: generationConfig.model,
+                    size: node.metadata?.size,
+                    seconds: node.metadata?.seconds,
+                    vquality,
+                    generateAudio: node.metadata?.generateAudio,
+                    watermark: node.metadata?.watermark,
+                    videoMode: node.metadata?.videoMode,
+                },
+            };
+            setNodes((prev) => [...prev, childNode]);
+            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
+            setSelectedNodeIds(new Set([childId]));
+            setDialogNodeId(null);
+            setRunningNodeId(childId);
+            const controller = startGenerationRequest(childId, node.id, childId);
+            try {
+                const task = await promoteDreamMakerDraft(draftTaskId, targetResolution, controller.signal);
+                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, videoTaskId: task.id, videoTaskProvider: "dreammaker", videoTaskSubApp: task.subApp } } : item)));
+                const videoResult = await waitForVideoGenerationTask(generationConfig, { id: task.id, provider: "dreammaker", model: generationConfig.model, subApp: task.subApp }, { signal: controller.signal });
+                const video = await storeGeneratedVideo(videoResult);
+                setNodes((prev) => prev.map((item) => (item.id === childId ? applyGeneratedVideo(item, video, { prompt: node.metadata?.prompt, model: generationConfig.model, vquality }) : item)));
+            } catch (error) {
+                if (isGenerationCanceled(error)) return;
+                const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                message.error(errorDetails);
+                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails, ...(isVideoTaskFailed(error) ? { videoTaskId: undefined } : {}) } } : item)));
+            } finally {
+                finishGenerationRequest(childId, controller);
+                setRunningNodeId((current) => (current === childId ? null : current));
+            }
+        },
+        [effectiveConfig, finishGenerationRequest, message, startGenerationRequest, t],
+    );
+
     const generateImageFromTextNode = useCallback(
         (node: CanvasNodeData) => {
             const prompt = (node.metadata?.content || node.metadata?.prompt || "").trim();
@@ -3970,6 +4135,7 @@ function InfiniteCanvasPage() {
                         setAcousticEditNodeId(node.id);
                     }}
                     showAcousticEdit={toolbarNode ? isFireRedSpeech(toolbarNode.metadata?.model || effectiveConfig.audioModel || effectiveConfig.model) : false}
+                    onPromoteDraft={(node, resolution) => void promoteVideoDraftNode(node, resolution)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}
                     onUngroup={(node) => ungroupSelection(new Set([node.id]))}

@@ -6,9 +6,10 @@ import { useTranslation } from "react-i18next";
 
 import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel, type ImageReferenceInfo } from "@/components/image-settings-panel";
 import { isQwenImage21 } from "@/constant/comfyui";
+import { getDreamMakerImageSpec } from "@/constant/dreammaker";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
-import type { AiConfig } from "@/stores/use-config-store";
+import { boolConfig, type AiConfig } from "@/stores/use-config-store";
 
 type CanvasImageSettingsPopoverProps = {
     config: AiConfig;
@@ -32,12 +33,29 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     const quality = config.quality || "auto";
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
-    const qwen = isQwenImage21(config.model || config.imageModel);
+    const activeModel = config.model || config.imageModel;
+    const qwen = isQwenImage21(activeModel);
+    const dmSpec = getDreamMakerImageSpec(activeModel);
     const hasImageReferences = (imageReferences?.count || 0) > 0;
     const qwenResolutionLabels: Record<string, string> = { "0": "跟随原图", "1024": "1K", "1536": "1.5K", "2048": "2K", "4096": "4K" };
     const qwenResolutionLabel = qwenResolutionLabels[config.imageResolution || "1024"] || `${config.imageResolution}px`;
     // 「跟随原图」只在有参考图（编辑模式）时有意义；文生图下按 1K 显示。
     const qwenSummaryResolution = !hasImageReferences && (config.imageResolution || "1024") === "0" ? "1K" : qwenResolutionLabel;
+    const summaryText = (() => {
+        if (qwen) return `${qwenSummaryResolution} · ${imageSizeLabel(activeSize)} · ${t("canvas.controls.images", { count })}`;
+        if (dmSpec?.family === "mj") {
+            const mjQuality = !dmSpec.niji && boolConfig(config.dmMjHd, false) ? "2K" : "标准";
+            const mjCount = Math.max(4, Math.min(12, Math.ceil(count / 4) * 4));
+            return `${mjQuality} · ${imageSizeLabel(activeSize)} · ${t("canvas.controls.images", { count: mjCount })}`;
+        }
+        if (dmSpec?.family === "ark") {
+            const tiers = dmSpec.arkTiers || ["1K", "2K"];
+            const tier = tiers.includes((config.dmArkSizeTier || "").toUpperCase()) ? (config.dmArkSizeTier || "").toUpperCase() : tiers.includes("2K") ? "2K" : tiers[0];
+            const sizeText = /^\d+x\d+$/i.test(activeSize) ? activeSize : `${tier} · ${imageSizeLabel(activeSize)}`;
+            return `${sizeText} · ${t("canvas.controls.images", { count })}`;
+        }
+        return `${imageQualityLabel(quality)} · ${imageSizeLabel(activeSize)} · ${t("canvas.controls.images", { count })}`;
+    })();
     const updateOpen = (nextOpen: boolean) => {
         setOpen(nextOpen);
         onOpenChange?.(nextOpen);
@@ -72,9 +90,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
         <>
             <span ref={buttonRef} className="inline-flex min-w-0">
                 <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[180px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => updateOpen(!open)}>
-                    <span className="truncate">
-                        {qwen ? `${qwenSummaryResolution} · ${imageSizeLabel(activeSize)}` : `${imageQualityLabel(quality)} · ${imageSizeLabel(activeSize)}`} · {t("canvas.controls.images", { count })}
-                    </span>
+                    <span className="truncate">{summaryText}</span>
                 </Button>
             </span>
             {panel}

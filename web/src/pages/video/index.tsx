@@ -1,6 +1,6 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon, WandSparkles } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
+import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
@@ -13,13 +13,15 @@ import { VideoSettingsPanel, normalizeVideoModeValue, normalizeVideoResolutionVa
 import { canvasThemes } from "@/lib/canvas-theme";
 import { clampVideoSeconds } from "@/lib/media-size";
 import { H3_REFERENCE_PROMPT_TEMPLATES, isMiniMaxH3 } from "@/constant/comfyui";
+import { isDreamMakerSeedance, SEEDANCE_FRAMES_PROMPT_TEMPLATES, SEEDANCE_REFERENCE_PROMPT_TEMPLATES } from "@/constant/dreammaker";
+import { getPromptOptimizeSpec, optimizeModelPrompt } from "@/lib/prompt-optimizer";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { deleteStoredMedia, resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, ensureImagePreview, getImagePreviewRevision, previewUrlFor, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, isVideoTaskFailed, waitForVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
-import { boolConfig, defaultConfig, modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { boolConfig, defaultConfig, modelOptionLabel, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
 import i18n from "@/i18n";
@@ -98,6 +100,9 @@ export default function VideoPage() {
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [referenceDragTarget, setReferenceDragTarget] = useState(false);
     const [autoRunToken, setAutoRunToken] = useState(0);
+    const [optimizing, setOptimizing] = useState(false);
+    const [promptBeforeOptimize, setPromptBeforeOptimize] = useState<string | null>(null);
+    const optimizeControllerRef = useRef<AbortController | null>(null);
     const videoCommand = useWorkbenchAgentStore((state) => state.videoCommand);
     const clearVideoCommand = useWorkbenchAgentStore((state) => state.clearVideoCommand);
     const updateAgentTask = useWorkbenchAgentStore((state) => state.updateTask);
@@ -106,6 +111,60 @@ export default function VideoPage() {
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
+    const optimizeSpec = getPromptOptimizeSpec({
+        mode: "video",
+        model,
+        config: { ...effectiveConfig, model },
+        imageCount: references.length,
+        videoCount: 0,
+        audioCount: 0,
+    });
+
+    const handleOptimizePrompt = async () => {
+        if (optimizing) {
+            optimizeControllerRef.current?.abort();
+            setOptimizing(false);
+            return;
+        }
+        const draft = prompt.trim();
+        if (!draft) {
+            message.warning(t("videoWorkbench.promptRequired"));
+            return;
+        }
+        const textModel = resolveModelForCapability(effectiveConfig, effectiveConfig.textModel, "text");
+        if (!isAiConfigReady(effectiveConfig, textModel)) {
+            message.warning("请先在设置中配置文本模型（用于提示词优化）");
+            openConfigDialog(true);
+            return;
+        }
+        const controller = new AbortController();
+        optimizeControllerRef.current = controller;
+        setPromptBeforeOptimize(prompt);
+        setOptimizing(true);
+        try {
+            const optimized = await optimizeModelPrompt(
+                { ...effectiveConfig, textModel },
+                draft,
+                { mode: "video", model, config: { ...effectiveConfig, model }, imageCount: references.length, videoCount: 0, audioCount: 0 },
+                (partial) => {
+                    if (!controller.signal.aborted && partial.trim()) setPrompt(partial);
+                },
+                controller.signal,
+            );
+            if (!controller.signal.aborted && optimized) {
+                setPrompt(optimized);
+                message.success(`已按${optimizeSpec.specLabel}优化提示词`);
+            }
+        } catch (error) {
+            if (!(error instanceof DOMException && error.name === "AbortError")) {
+                message.error(error instanceof Error ? error.message : "提示词优化失败");
+                setPromptBeforeOptimize(null);
+            }
+        } finally {
+            if (optimizeControllerRef.current === controller) optimizeControllerRef.current = null;
+            setOptimizing(false);
+        }
+    };
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -394,7 +453,17 @@ export default function VideoPage() {
                             <div>
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">{t("workbench.prompt")}</span>
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-wrap gap-2">
+                                        {promptBeforeOptimize !== null && !optimizing ? (
+                                            <Button size="small" icon={<RotateCcw className="size-3.5" />} onClick={() => { setPrompt(promptBeforeOptimize); setPromptBeforeOptimize(null); }}>
+                                                撤销优化
+                                            </Button>
+                                        ) : null}
+                                        <Tooltip title={`按${optimizeSpec.specLabel}优化提示词`}>
+                                            <Button size="small" icon={optimizing ? <LoaderCircle className="size-3.5 animate-spin" /> : <WandSparkles className="size-3.5" />} disabled={!optimizing && !prompt.trim()} onClick={() => void handleOptimizePrompt()}>
+                                                {optimizing ? "停止优化" : "优化提示词"}
+                                            </Button>
+                                        </Tooltip>
                                         <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
                                             {t("workbench.viewPrompts")}
                                         </Button>
@@ -406,6 +475,15 @@ export default function VideoPage() {
                                 {isMiniMaxH3(model) && normalizeVideoModeValue(effectiveConfig.videoMode) === "reference" ? (
                                     <div className="mb-2 flex flex-wrap gap-1.5">
                                         {H3_REFERENCE_PROMPT_TEMPLATES.map((template) => (
+                                            <button key={template.label} type="button" className="cursor-pointer rounded-full border border-stone-300 px-2.5 py-1 text-xs text-stone-600 transition hover:opacity-75 dark:border-stone-700 dark:text-stone-300" onClick={() => setPrompt((value) => (value.trim() ? `${value.trim()}\n${template.prompt}` : template.prompt))}>
+                                                {template.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : null}
+                                {isDreamMakerSeedance(model) && (normalizeVideoModeValue(effectiveConfig.videoMode) === "reference" || normalizeVideoModeValue(effectiveConfig.videoMode) === "frames") ? (
+                                    <div className="mb-2 flex flex-wrap gap-1.5">
+                                        {(normalizeVideoModeValue(effectiveConfig.videoMode) === "reference" ? SEEDANCE_REFERENCE_PROMPT_TEMPLATES : SEEDANCE_FRAMES_PROMPT_TEMPLATES).map((template) => (
                                             <button key={template.label} type="button" className="cursor-pointer rounded-full border border-stone-300 px-2.5 py-1 text-xs text-stone-600 transition hover:opacity-75 dark:border-stone-700 dark:text-stone-300" onClick={() => setPrompt((value) => (value.trim() ? `${value.trim()}\n${template.prompt}` : template.prompt))}>
                                                 {template.label}
                                             </button>

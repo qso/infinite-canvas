@@ -10,6 +10,8 @@ import { useImageEditorViewport } from "@/components/canvas/use-image-editor-vie
 export type CanvasImageMaskEditPayload = {
     prompt: string;
     maskDataUrl: string;
+    alphaMaskDataUrl: string;
+    bwMaskDataUrl: string;
     generate: boolean;
 };
 
@@ -210,7 +212,13 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
         if (!nextPrompt) return setError(t("canvas.editors.maskPromptRequired"));
         if (!canvas || !element) return;
         if (!canvasHasPaint(canvas)) return setError(t("canvas.editors.maskRequired"));
-        onConfirm({ prompt: nextPrompt, maskDataUrl: buildMaskOverlay(element, canvas), generate });
+        onConfirm({
+            prompt: nextPrompt,
+            maskDataUrl: buildMaskOverlay(element, canvas),
+            alphaMaskDataUrl: buildAlphaMask(canvas),
+            bwMaskDataUrl: buildBwMask(canvas),
+            generate,
+        });
     };
 
     return (
@@ -434,5 +442,39 @@ function buildMaskOverlay(image: HTMLImageElement, selectionCanvas: HTMLCanvasEl
     overlayContext.fillRect(0, 0, overlay.width, overlay.height);
     context.globalAlpha = maskOverlayAlpha;
     context.drawImage(overlay, 0, 0);
+    return canvas.toDataURL("image/png");
+}
+
+function buildAlphaMask(selectionCanvas: HTMLCanvasElement) {
+    const canvas = document.createElement("canvas");
+    canvas.width = selectionCanvas.width;
+    canvas.height = selectionCanvas.height;
+    const context = canvas.getContext("2d");
+    if (!context) return selectionCanvas.toDataURL("image/png");
+    context.fillStyle = "#000000";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.globalCompositeOperation = "destination-out";
+    context.drawImage(selectionCanvas, 0, 0);
+    return canvas.toDataURL("image/png");
+}
+
+function buildBwMask(selectionCanvas: HTMLCanvasElement) {
+    const canvas = document.createElement("canvas");
+    canvas.width = selectionCanvas.width;
+    canvas.height = selectionCanvas.height;
+    const context = canvas.getContext("2d");
+    if (!context) return selectionCanvas.toDataURL("image/png");
+    context.fillStyle = "#000000";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const white = document.createElement("canvas");
+    white.width = canvas.width;
+    white.height = canvas.height;
+    const whiteContext = white.getContext("2d");
+    if (!whiteContext) return canvas.toDataURL("image/png");
+    whiteContext.drawImage(selectionCanvas, 0, 0);
+    whiteContext.globalCompositeOperation = "source-in";
+    whiteContext.fillStyle = "#ffffff";
+    whiteContext.fillRect(0, 0, white.width, white.height);
+    context.drawImage(white, 0, 0);
     return canvas.toDataURL("image/png");
 }

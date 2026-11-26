@@ -2,6 +2,7 @@ export const MINIMAX_H3_OPTION = "comfyui::MiniMax-H3";
 export const MINIMAX_H3_FAST_OPTION = "comfyui::MiniMax-H3-Fast";
 export const QWEN_IMAGE_21_OPTION = "comfyui::Qwen-Image-2.1";
 export const COMFYUI_PROXY_PATH = "/comfyui";
+export const COMFYUI_VIDEO_PROXY_PATH = "/h3";
 export const H3_DEFAULT_STEPS = 20;
 export const H3_FAST_DEFAULT_STEPS = 4;
 export const H3_MAX_STEPS = 10000; // BasicScheduler's native upper bound.
@@ -10,6 +11,7 @@ export const QWEN_IMAGE_21_MAX_STEPS = 60;
 // 转发目标地址放在 web/.env.local 的 COMFYUI_REMOTE_URL（vite.config / 测试脚本读取）。
 
 export function isMiniMaxH3(value: string) {
+    if (value.startsWith("dreammaker::")) return false;
     return /^minimax[-_ ]?h3(?:$|[-_ ])/i.test(value.split("::").at(-1)?.trim() || "");
 }
 

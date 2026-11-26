@@ -2,8 +2,10 @@ import axios from "axios";
 
 import i18n from "@/i18n";
 import { isQwenImage21 } from "@/constant/comfyui";
+import { isDreamMakerImage } from "@/constant/dreammaker";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { qwenComfyError, runQwenImageGeneration } from "./comfyui-qwen";
+import { runDreamMakerImageGeneration } from "./dreammaker";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -97,7 +99,7 @@ type GeminiPayload = {
     promptFeedback?: { blockReason?: string };
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
-type RequestOptions = { signal?: AbortSignal; onImageTaskIds?: (ids: string[]) => void };
+type RequestOptions = { signal?: AbortSignal; onImageTaskIds?: (ids: string[]) => void; maskDataUrl?: string; bwMaskDataUrl?: string };
 
 const IMAGE_QUALITY_VALUES = ["low", "medium", "high", "xhigh", "max"];
 const DEFAULT_IMAGE_SHORT_SIDE = 1024;
@@ -694,9 +696,13 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const selectedModel = config.model || config.imageModel;
+    const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    if (isQwenImage21(config.model || config.imageModel)) {
+    if (isDreamMakerImage(selectedModel)) {
+        return await runDreamMakerImageGeneration(config, prompt, [], n, options);
+    }
+    if (isQwenImage21(selectedModel)) {
         try {
             return await runQwenImageGeneration(config, prompt, [], n, options?.signal, options?.onImageTaskIds);
         } catch (error) {
@@ -761,9 +767,13 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const selectedModel = config.model || config.imageModel;
+    const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    if (isQwenImage21(config.model || config.imageModel)) {
+    if (isDreamMakerImage(selectedModel)) {
+        return await runDreamMakerImageGeneration(config, prompt, references, n, options);
+    }
+    if (isQwenImage21(selectedModel)) {
         try {
             return await runQwenImageGeneration(config, prompt, references, n, options?.signal, options?.onImageTaskIds);
         } catch (error) {

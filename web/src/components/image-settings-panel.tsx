@@ -5,11 +5,12 @@ import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { isQwenImage21, QWEN_IMAGE_21_DEFAULT_STEPS, QWEN_IMAGE_21_MAX_STEPS } from "@/constant/comfyui";
+import { getDreamMakerImageSpec } from "@/constant/dreammaker";
 import { alignQwen32, resolveQwenCanvasPlan } from "@/services/api/comfyui-qwen";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { readImageMeta } from "@/lib/image-utils";
 import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaRatioOptions, mediaScaleOptions, parsePixelSize, readMediaDimensions } from "@/lib/media-size";
-import type { AiConfig } from "@/stores/use-config-store";
+import { boolConfig, type AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
     { value: "auto", labelKey: "auto" },
@@ -31,7 +32,32 @@ export const imageQualityOptions = qualityOptions.map((item) => ({ value: item.v
 export const imageAspectOptions = mediaRatioOptions.map((item) => ({ value: item.value, label: item.value === "auto" ? i18n.t("settingsPanels.common.auto") : item.value }));
 export const imageScaleOptions = mediaScaleOptions.map((value) => ({ value, label: value === "auto" ? i18n.t("settingsPanels.common.auto") : value }));
 
-type ImageConfigKey = "quality" | "size" | "count" | "background" | "imageSteps" | "imageCfg" | "imageSeed" | "imageNegative" | "imageResolution";
+type ImageConfigKey =
+    | "quality"
+    | "size"
+    | "count"
+    | "background"
+    | "imageSteps"
+    | "imageCfg"
+    | "imageSeed"
+    | "imageNegative"
+    | "imageResolution"
+    | "dmMjQuality"
+    | "dmMjHd"
+    | "dmMjRaw"
+    | "dmMjStylize"
+    | "dmMjChaos"
+    | "dmMjWeird"
+    | "dmMjExp"
+    | "dmMjTile"
+    | "dmMjIw"
+    | "dmMjMode"
+    | "dmGptFormat"
+    | "dmGptModeration"
+    | "dmArkSizeTier"
+    | "dmArkOptimizePrompt"
+    | "dmArkWebSearch"
+    | "dmArkLayerDecomposition";
 export type ImageReferenceInfo = { count: number; firstUrl?: string };
 type ImageSettingsPanelProps = {
     config: AiConfig;
@@ -47,7 +73,12 @@ type ImageSettingsPanelProps = {
 
 export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, imageReferences }: ImageSettingsPanelProps) {
     const { t } = useTranslation();
-    const qwen = isQwenImage21(config.model || config.imageModel);
+    const activeModel = config.model || config.imageModel;
+    const qwen = isQwenImage21(activeModel);
+    const dmSpec = getDreamMakerImageSpec(activeModel);
+    const dmMj = dmSpec?.family === "mj";
+    const dmArk = dmSpec?.family === "ark";
+    const dmGpt = dmSpec?.family === "gpt";
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const dimensionStep = qwen ? 32 : 16;
     const hasImageReferences = (imageReferences?.count || 0) > 0;
@@ -75,6 +106,10 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const selectedRatio = inferMediaRatio(activeSize);
     const dimensions = readMediaDimensions(activeSize, selectedScale, selectedRatio);
     const editResolution = config.imageResolution || "1024";
+    const arkTiers = dmSpec?.arkTiers || ["1K", "2K"];
+    const arkTier = arkTiers.includes((config.dmArkSizeTier || "").toUpperCase()) ? (config.dmArkSizeTier || "").toUpperCase() : arkTiers.includes("2K") ? "2K" : arkTiers[0];
+    const mjDisplayCount = Math.max(4, Math.min(12, Math.ceil(count / 4) * 4));
+    const arkCustomPixels = dmArk ? parsePixelSize(activeSize) : null;
     // 图像编辑的预估输出：跟随第 1 张参考图的比例（与云端 TextEncode 的缩放数学一致，32 对齐；4K 档为超分后的长边）。
     const editOutputSize = (() => {
         if (!qwen || !hasImageReferences || !firstReferenceSize) return null;
@@ -89,7 +124,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     })();
     const applySize = (scale: string, ratio: string) => onConfigChange("size", computeMediaSize(scale, ratio));
     const selectScale = (scale: string) => applySize(scale, selectedRatio === "auto" ? "1:1" : selectedRatio);
-    const selectRatio = (ratio: string) => (qwen ? onConfigChange("size", ratio) : applySize(selectedScale, ratio));
+    const selectRatio = (ratio: string) => (qwen || dmMj || dmArk ? onConfigChange("size", ratio) : applySize(selectedScale, ratio));
     // 预览与提交共用同一份画布计算（resolveQwenCanvasPlan），面板显示的就是实际采样尺寸。
     const qwenPlan = qwen ? resolveQwenCanvasPlan(config, hasImageReferences) : null;
     const activeDimensions = qwen
@@ -130,7 +165,28 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         由云端 ComfyUI 生成（BF16）。无参考图时为文生图；连接参考图后自动变为图像编辑，第一张是编辑目标，提示词里可用 &lt;image1&gt;、&lt;image2&gt; 引用。
                     </p>
                 ) : null}
-                {!qwen ? (
+                {dmMj ? (
+                    <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                        {hasImageReferences
+                            ? `由 DreamMaker ${dmSpec.label.replace(/（DreamMaker）$/, "")} 生成（每次 4 张）。已连接参考图将作为图像参考 (irefs)，请配合英文视觉描述使用。`
+                            : `由 DreamMaker ${dmSpec.label.replace(/（DreamMaker）$/, "")} 生成，每次出图固定返回 4 张（1 组）；推荐使用简短具体的英文视觉短语。`}
+                    </p>
+                ) : null}
+                {dmArk ? (
+                    <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                        {hasImageReferences
+                            ? "已连接参考图，自动转为图生图/融合模式，提示词中可用「图1」「图2」指代并写明不变约束。"
+                            : "由 DreamMaker Seedream 生成，原生擅长连贯中文长句描述；避免逗号堆砌标签词。"}
+                    </p>
+                ) : null}
+                {dmGpt ? (
+                    <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                        {hasImageReferences
+                            ? "支持多图参考融合与蒙版局部重绘，请在提示词中写清变化动作并显式锁定不变要素。"
+                            : "由 DreamMaker GPT Image 生成，擅长精确文字排版、透明背景与结构化写实分镜。"}
+                    </p>
+                ) : null}
+                {!qwen && !dmMj && !dmArk ? (
                     <div className="space-y-2.5">
                         <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.quality")}</SettingTitle>
                         <div className="grid grid-cols-3 gap-2.5">
@@ -142,7 +198,50 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </div>
                     </div>
                 ) : null}
-                {!qwen ? (
+                {dmMj && !dmSpec.niji ? (
+                    <div className="space-y-2.5">
+                        <SettingTitle color={theme.node.muted}>细节与分辨率</SettingTitle>
+                        <div className="grid grid-cols-2 gap-2.5">
+                            <OptionPill selected={!boolConfig(config.dmMjHd, false)} theme={theme} onClick={() => onConfigChange("dmMjHd", "false")}>
+                                标准 1K
+                            </OptionPill>
+                            <OptionPill selected={boolConfig(config.dmMjHd, false)} theme={theme} onClick={() => onConfigChange("dmMjHd", "true")}>
+                                高清 2K (--hd)
+                            </OptionPill>
+                            <OptionPill selected={(config.dmMjQuality || "4") === "4"} theme={theme} onClick={() => onConfigChange("dmMjQuality", "4")}>
+                                精细细节 (--q 4)
+                            </OptionPill>
+                            <OptionPill selected={config.dmMjQuality === "1"} theme={theme} onClick={() => onConfigChange("dmMjQuality", "1")}>
+                                标准细节 (--q 1)
+                            </OptionPill>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 pt-1">
+                            <div className="space-y-0.5">
+                                <SettingTitle color={theme.node.muted}>原始写实模式 (--raw)</SettingTitle>
+                                <div className="text-xs" style={{ color: theme.node.muted, opacity: 0.75 }}>
+                                    关闭默认艺术滤镜，适合摄影与精准遵循细节
+                                </div>
+                            </div>
+                            <span onMouseDown={(event) => event.stopPropagation()}>
+                                <Switch size="small" checked={boolConfig(config.dmMjRaw, false)} onChange={(checked) => onConfigChange("dmMjRaw", String(checked))} />
+                            </span>
+                        </div>
+                    </div>
+                ) : null}
+                {dmMj && dmSpec.niji ? (
+                    <div className="space-y-2.5">
+                        <SettingTitle color={theme.node.muted}>调度速度</SettingTitle>
+                        <div className="grid grid-cols-2 gap-2.5">
+                            <OptionPill selected={config.dmMjMode !== "turbo"} theme={theme} onClick={() => onConfigChange("dmMjMode", "fast")}>
+                                标准 (Fast)
+                            </OptionPill>
+                            <OptionPill selected={config.dmMjMode === "turbo"} theme={theme} onClick={() => onConfigChange("dmMjMode", "turbo")}>
+                                极速 (Turbo)
+                            </OptionPill>
+                        </div>
+                    </div>
+                ) : null}
+                {!qwen && !dmMj && !dmArk ? (
                     <div className="space-y-2.5">
                         <div className="flex items-center justify-between gap-3">
                             <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.size")}</SettingTitle>
@@ -162,34 +261,57 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </div>
                     </div>
                 ) : null}
-                <div className="space-y-2.5">
-                    <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.resolution")}</SettingTitle>
-                    {qwen ? (
-                        <>
-                            <div className="grid grid-cols-3 gap-2.5">
-                                {(hasImageReferences ? qwenResolutionOptions : qwenResolutionOptions.filter((item) => item.value !== "0")).map((item) => (
-                                    <OptionPill key={item.value} selected={editResolution === item.value} theme={theme} onClick={() => selectQwenResolution(item.value)}>
-                                        {item.label}
+                {!dmMj ? (
+                    <div className="space-y-2.5">
+                        <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.resolution")}</SettingTitle>
+                        {qwen ? (
+                            <>
+                                <div className="grid grid-cols-3 gap-2.5">
+                                    {(hasImageReferences ? qwenResolutionOptions : qwenResolutionOptions.filter((item) => item.value !== "0")).map((item) => (
+                                        <OptionPill key={item.value} selected={editResolution === item.value} theme={theme} onClick={() => selectQwenResolution(item.value)}>
+                                            {item.label}
+                                        </OptionPill>
+                                    ))}
+                                    <ResolutionInput value={qwenResolutionOptions.some((item) => item.value === editResolution) ? "" : editResolution} theme={theme} onChange={(value) => selectQwenResolution(value.trim() || "1024")} />
+                                </div>
+                                <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                                    {hasImageReferences
+                                        ? "1K/1.5K/2K 是像素预算：宽高比为「自动」时输出跟随第 1 张参考图的比例，选择比例或修改宽高后按所选画布重新构图（参考图仅作内容依据，不会被拉伸）；「跟随原图」保持第 1 张参考图原始尺寸；「4K」先原生 2K 采样再经 SeedVR2 超分到长边 4096，耗时更高。"
+                                        : "1K/1.5K/2K 是像素预算（1K≈1024²、2K≈2048²），配合宽高比得到下方「输出尺寸」；「4K」先原生 2K 采样再经 SeedVR2 超分到长边 4096，耗时更高。连接参考图后可切换为跟随原图。"}
+                                </p>
+                            </>
+                        ) : dmArk ? (
+                            <>
+                                <div className="grid grid-cols-3 gap-2.5">
+                                    {arkTiers.map((tier) => (
+                                        <OptionPill
+                                            key={tier}
+                                            selected={!arkCustomPixels && arkTier === tier}
+                                            theme={theme}
+                                            onClick={() => {
+                                                onConfigChange("dmArkSizeTier", tier);
+                                                if (arkCustomPixels) onConfigChange("size", selectedRatio === "auto" ? "auto" : selectedRatio);
+                                            }}
+                                        >
+                                            {tier}
+                                        </OptionPill>
+                                    ))}
+                                </div>
+                                <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                                    选择档位加宽高比，或在下方自定义精确像素尺寸（如 2048×2048，适合对比例严格敏感的场景）。
+                                </p>
+                            </>
+                        ) : (
+                            <div className="grid grid-cols-4 gap-2.5">
+                                {mediaScaleOptions.map((value) => (
+                                    <OptionPill key={value} selected={selectedScale === value} theme={theme} onClick={() => selectScale(value)}>
+                                        {value === "auto" ? t("settingsPanels.common.auto") : value}
                                     </OptionPill>
                                 ))}
-                                <ResolutionInput value={qwenResolutionOptions.some((item) => item.value === editResolution) ? "" : editResolution} theme={theme} onChange={(value) => selectQwenResolution(value.trim() || "1024")} />
                             </div>
-                            <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
-                                {hasImageReferences
-                                    ? "1K/1.5K/2K 是像素预算：宽高比为「自动」时输出跟随第 1 张参考图的比例，选择比例或修改宽高后按所选画布重新构图（参考图仅作内容依据，不会被拉伸）；「跟随原图」保持第 1 张参考图原始尺寸；「4K」先原生 2K 采样再经 SeedVR2 超分到长边 4096，耗时更高。"
-                                    : "1K/1.5K/2K 是像素预算（1K≈1024²、2K≈2048²），配合宽高比得到下方「输出尺寸」；「4K」先原生 2K 采样再经 SeedVR2 超分到长边 4096，耗时更高。连接参考图后可切换为跟随原图。"}
-                            </p>
-                        </>
-                    ) : (
-                        <div className="grid grid-cols-4 gap-2.5">
-                            {mediaScaleOptions.map((value) => (
-                                <OptionPill key={value} selected={selectedScale === value} theme={theme} onClick={() => selectScale(value)}>
-                                    {value === "auto" ? t("settingsPanels.common.auto") : value}
-                                </OptionPill>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                        )}
+                    </div>
+                ) : null}
                 {qwen && followOriginal ? (
                     <div className="space-y-2.5">
                         <SettingTitle color={theme.node.muted}>输出尺寸（已锁定）</SettingTitle>
@@ -246,7 +368,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </p>
                     </div>
                 ) : null}
-                {!qwen ? (
+                {!qwen && !dmMj && !dmArk ? (
                     <div className="flex items-center justify-between gap-3">
                         <div className="space-y-0.5">
                             <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.transparent")}</SettingTitle>
@@ -258,6 +380,174 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                             <Switch size="small" checked={transparentBackground} onChange={(checked) => onConfigChange("background", checked ? "transparent" : "")} />
                         </span>
                     </div>
+                ) : null}
+                {dmArk ? (
+                    <div className="space-y-3">
+                        <div className="space-y-2.5">
+                            <SettingTitle color={theme.node.muted}>精确像素尺寸（可选，覆盖档位）</SettingTitle>
+                            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
+                                <DimensionInput
+                                    prefix="W"
+                                    value={arkCustomPixels?.width || 0}
+                                    disabled={false}
+                                    theme={theme}
+                                    alignToStep={false}
+                                    step={16}
+                                    onChange={(value) => {
+                                        const w = Math.max(256, Math.floor(value || 2048));
+                                        const h = arkCustomPixels?.height || 2048;
+                                        onConfigChange("size", `${w}x${h}`);
+                                    }}
+                                />
+                                <span className="text-lg opacity-45">↔</span>
+                                <DimensionInput
+                                    prefix="H"
+                                    value={arkCustomPixels?.height || 0}
+                                    disabled={false}
+                                    theme={theme}
+                                    alignToStep={false}
+                                    step={16}
+                                    onChange={(value) => {
+                                        const w = arkCustomPixels?.width || 2048;
+                                        const h = Math.max(256, Math.floor(value || 2048));
+                                        onConfigChange("size", `${w}x${h}`);
+                                    }}
+                                />
+                            </div>
+                        </div>
+                        {dmSpec.supportsLayerDecomp ? (
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="space-y-0.5">
+                                    <SettingTitle color={theme.node.muted}>图层拆分</SettingTitle>
+                                    <div className="text-xs" style={{ color: theme.node.muted, opacity: 0.75 }}>
+                                        {hasImageReferences ? "将单张参考图拆解为底图和多个独立图层" : "需连接 1 张参考图后生效"}
+                                    </div>
+                                </div>
+                                <span onMouseDown={(event) => event.stopPropagation()}>
+                                    <Switch size="small" checked={boolConfig(config.dmArkLayerDecomposition, false)} onChange={(checked) => onConfigChange("dmArkLayerDecomposition", String(checked))} />
+                                </span>
+                            </div>
+                        ) : null}
+                        {dmSpec.supportsWebSearch ? (
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="space-y-0.5">
+                                    <SettingTitle color={theme.node.muted}>联网搜索增强</SettingTitle>
+                                    <div className="text-xs" style={{ color: theme.node.muted, opacity: 0.75 }}>
+                                        生图前自动检索最新人物或产品外观信息
+                                    </div>
+                                </div>
+                                <span onMouseDown={(event) => event.stopPropagation()}>
+                                    <Switch size="small" checked={boolConfig(config.dmArkWebSearch, false)} onChange={(checked) => onConfigChange("dmArkWebSearch", String(checked))} />
+                                </span>
+                            </div>
+                        ) : null}
+                        {dmSpec.supportsOptimizePrompt ? (
+                            <div className="space-y-2.5">
+                                <SettingTitle color={theme.node.muted}>平台提示词改写</SettingTitle>
+                                <div className="grid grid-cols-3 gap-2.5">
+                                    {[
+                                        { value: "", label: "关闭" },
+                                        { value: "fast", label: "快速" },
+                                        { value: "standard", label: "标准" },
+                                    ].map((item) => (
+                                        <OptionPill key={item.label} selected={(config.dmArkOptimizePrompt || "") === item.value} theme={theme} onClick={() => onConfigChange("dmArkOptimizePrompt", item.value)}>
+                                            {item.label}
+                                        </OptionPill>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
+                        <details className="group">
+                            <summary className="!flex cursor-pointer list-none items-center justify-between py-1 text-sm [&::-webkit-details-marker]:hidden">
+                                高级设置
+                                <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+                            </summary>
+                            <div className="space-y-4 pt-3">
+                                <SettingGroup title="随机种子" color={theme.node.muted}>
+                                    <InputNumber className="!w-full !rounded-xl" aria-label="随机种子" min={0} max={Number.MAX_SAFE_INTEGER} precision={0} controls={false} placeholder="留空随机 (-1)" value={config.imageSeed ? Number(config.imageSeed) : null} onChange={(value) => onConfigChange("imageSeed", value === null ? "" : String(value))} />
+                                </SettingGroup>
+                            </div>
+                        </details>
+                    </div>
+                ) : null}
+                {dmGpt ? (
+                    <details className="group">
+                        <summary className="!flex cursor-pointer list-none items-center justify-between py-1 text-sm [&::-webkit-details-marker]:hidden">
+                            高级设置
+                            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+                        </summary>
+                        <div className="space-y-4 pt-3">
+                            <SettingGroup title="输出格式" color={theme.node.muted}>
+                                <div className="grid grid-cols-3 gap-2.5">
+                                    {["png", "jpeg", "webp"].map((fmt) => (
+                                        <OptionPill
+                                            key={fmt}
+                                            selected={(transparentBackground ? "png" : config.dmGptFormat || "png") === fmt}
+                                            theme={theme}
+                                            onClick={() => onConfigChange("dmGptFormat", transparentBackground ? "png" : fmt)}
+                                        >
+                                            {fmt.toUpperCase()}
+                                        </OptionPill>
+                                    ))}
+                                </div>
+                                {transparentBackground ? <p className="text-xs" style={{ color: theme.node.muted }}>透明背景模式下强制输出 PNG。</p> : null}
+                            </SettingGroup>
+                            <SettingGroup title="审核宽松度" color={theme.node.muted}>
+                                <div className="grid grid-cols-2 gap-2.5">
+                                    <OptionPill selected={config.dmGptModeration !== "low"} theme={theme} onClick={() => onConfigChange("dmGptModeration", "auto")}>
+                                        标准 (auto)
+                                    </OptionPill>
+                                    <OptionPill selected={config.dmGptModeration === "low"} theme={theme} onClick={() => onConfigChange("dmGptModeration", "low")}>
+                                        宽松 (low)
+                                    </OptionPill>
+                                </div>
+                            </SettingGroup>
+                        </div>
+                    </details>
+                ) : null}
+                {dmMj ? (
+                    <details className="group">
+                        <summary className="!flex cursor-pointer list-none items-center justify-between py-1 text-sm [&::-webkit-details-marker]:hidden">
+                            高级设置
+                            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+                        </summary>
+                        <div className="space-y-4 pt-3">
+                            <SettingGroup title="风格化 (--stylize 0-1000)" color={theme.node.muted}>
+                                <InputNumber className="!w-full !rounded-xl" min={0} max={1000} precision={0} value={config.dmMjStylize ? Number(config.dmMjStylize) : 100} onChange={(value) => onConfigChange("dmMjStylize", value === null ? "100" : String(value))} />
+                            </SettingGroup>
+                            <SettingGroup title="多样化 (--chaos 0-100)" color={theme.node.muted}>
+                                <InputNumber className="!w-full !rounded-xl" min={0} max={100} precision={0} value={config.dmMjChaos ? Number(config.dmMjChaos) : 0} onChange={(value) => onConfigChange("dmMjChaos", value === null ? "0" : String(value))} />
+                            </SettingGroup>
+                            <SettingGroup title="怪异度 (--weird 0-3000)" color={theme.node.muted}>
+                                <InputNumber className="!w-full !rounded-xl" min={0} max={3000} precision={0} value={config.dmMjWeird ? Number(config.dmMjWeird) : 0} onChange={(value) => onConfigChange("dmMjWeird", value === null ? "0" : String(value))} />
+                            </SettingGroup>
+                            {!dmSpec.niji ? (
+                                <>
+                                    <SettingGroup title="实验美学 (--exp 0-100)" color={theme.node.muted}>
+                                        <InputNumber className="!w-full !rounded-xl" min={0} max={100} precision={0} value={config.dmMjExp ? Number(config.dmMjExp) : 0} onChange={(value) => onConfigChange("dmMjExp", value === null ? "0" : String(value))} />
+                                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>推荐 0 / 5 / 10 / 25；大于 25 会压制 stylize。</p>
+                                    </SettingGroup>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <SettingTitle color={theme.node.muted}>无缝平铺 (--tile)</SettingTitle>
+                                        <span onMouseDown={(event) => event.stopPropagation()}>
+                                            <Switch size="small" checked={boolConfig(config.dmMjTile, false)} onChange={(checked) => onConfigChange("dmMjTile", String(checked))} />
+                                        </span>
+                                    </div>
+                                </>
+                            ) : null}
+                            {hasImageReferences ? (
+                                <SettingGroup title={`参考图权重 (--iw 0-${dmSpec.niji ? 2 : 3})`} color={theme.node.muted}>
+                                    <InputNumber className="!w-full !rounded-xl" min={0} max={dmSpec.niji ? 2 : 3} step={0.1} value={config.dmMjIw ? Number(config.dmMjIw) : 1} onChange={(value) => onConfigChange("dmMjIw", value === null ? "1" : String(value))} />
+                                </SettingGroup>
+                            ) : null}
+                            <SettingGroup title="负面排除 (--no)" color={theme.node.muted}>
+                                <Input className="!rounded-xl" placeholder="例如：text, watermark, extra people" value={config.imageNegative || ""} onChange={(event) => onConfigChange("imageNegative", event.target.value)} onMouseDown={(event) => event.stopPropagation()} />
+                            </SettingGroup>
+                            <SettingGroup title="随机种子" color={theme.node.muted}>
+                                <InputNumber className="!w-full !rounded-xl" min={0} max={4294967295} precision={0} controls={false} placeholder="留空，每次随机" value={config.imageSeed ? Number(config.imageSeed) : null} onChange={(value) => onConfigChange("imageSeed", value === null ? "" : String(value))} />
+                            </SettingGroup>
+                        </div>
+                    </details>
                 ) : null}
                 {qwen ? (
                     <details className="group">
@@ -294,14 +584,24 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 ) : null}
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.count")}</SettingTitle>
-                    <div className="grid grid-cols-4 gap-2.5">
-                        {Array.from({ length: quickCount }, (_, index) => index + 1).map((value) => (
-                            <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onConfigChange("count", String(value))}>
-                                {t("settingsPanels.image.images", { count: value })}
-                            </OptionPill>
-                        ))}
-                        <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
-                    </div>
+                    {dmMj ? (
+                        <div className="grid grid-cols-3 gap-2.5">
+                            {[4, 8, 12].map((value) => (
+                                <OptionPill key={value} selected={mjDisplayCount === value} theme={theme} onClick={() => onConfigChange("count", String(value))}>
+                                    {value} 张 ({value / 4} 组)
+                                </OptionPill>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-4 gap-2.5">
+                            {Array.from({ length: quickCount }, (_, index) => index + 1).map((value) => (
+                                <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onConfigChange("count", String(value))}>
+                                    {t("settingsPanels.image.images", { count: value })}
+                                </OptionPill>
+                            ))}
+                            <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
+                        </div>
+                    )}
                 </div>
             </div>
         </ImageSettingsTheme>

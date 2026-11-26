@@ -5,6 +5,7 @@ import { Button } from "antd";
 
 import { VideoSettingsPanel, videoAudioLabel, videoModeLabel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { isMiniMaxH3 } from "@/constant/comfyui";
+import { getDreamMakerVideoSpec } from "@/constant/dreammaker";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { boolConfig, type AiConfig } from "@/stores/use-config-store";
@@ -46,14 +47,19 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClass
 
     const panel = open && buttonRect ? <VideoSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} /> : null;
 
+    const activeModel = config.model || config.videoModel;
+    const dmSpec = getDreamMakerVideoSpec(activeModel);
+    const showAudioBadge = isMiniMaxH3(activeModel) || Boolean(dmSpec?.supportsAudioToggle);
+    const displayResolution = dmSpec ? (config.vquality === "480_draft" && dmSpec.resolutions.includes("480_draft") ? "480_draft" : dmSpec.resolutions.includes(config.vquality) ? config.vquality : dmSpec.defaultResolution) : config.vquality;
+
     return (
         <>
             <span ref={buttonRef} className="inline-flex min-w-0">
                 <Button size="small" type="text" aria-label="视频生成设置" className={buttonClassName || "!h-8 !max-w-[220px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => setOpen((current) => !current)}>
                     <span className="truncate">
-                        {videoResolutionLabel(config.vquality)} · {videoSizeLabel(config.size)} · {videoSecondsLabel(config.videoSeconds)} · {videoModeLabel(config.videoMode)}
+                        {videoResolutionLabel(displayResolution)} · {videoSizeLabel(config.size)} · {videoSecondsLabel(config.videoSeconds)} · {videoModeLabel(config.videoMode)}
                     </span>
-                    {isMiniMaxH3(config.model || config.videoModel) ? (
+                    {showAudioBadge ? (
                         <span className="shrink-0" title={videoAudioLabel(config.videoGenerateAudio)} aria-label={videoAudioLabel(config.videoGenerateAudio)}>
                             {boolConfig(config.videoGenerateAudio, true) ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
                         </span>

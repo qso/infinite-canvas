@@ -2,6 +2,38 @@
 
 ## Unreleased
 
++ [新增] 画布图形化节点与生图/视频工作台接入 DreamMaker 平台生图与生视频模型（GPT Image 2.6/2.5、Midjourney 8.2/8.1、Niji 7、Seedream 5.5/5.0/4.5/4.0、Seedance 2.5/2.5 Flash/2.0、MiniMax H3），经 Vite 本地服务端代理生成 HS256 JWT 并自动上传参考素材与下载产物；支持按模型自适应参数面板、MJ 一组 4 张与 Seedream 图层拆分、GPT/MJ 原生蒙版局部重绘、Seedance 2.5 草稿升 1080p/4K 以及刷新恢复任务。
++ [新增] 图形化节点提示词面板（含放大编辑器、生成配置组装器及生图/视频工作台）新增「优化提示词」与一键撤销：按当前所选模型的官方规范（MJ 英文短语与 `--no`、GPT Image 九模块与光学柔光、Seedream 连贯中文句、Seedance 四行分块与图生视频锁机位、MiniMax H3 英文物理动作）自动改写提示词。
+
++ [新增] YuE2 音乐 API 补齐生成 / 分析任务列表接口（`GET /v1/music/generations`、`GET /v1/music/analyses`，支持 `status`、`limit`），并新增 `services/yue2/API.md`：完整参数、状态机、错误码、幂等与 GPU 共享说明，以及原创、纯音乐、参考旋律/和弦/曲风、歌词提取的提示词写法与调用示例。
++ [调整] YuE2 音乐服务迁到音频机 `dep457-hzlizhaoming-infer-test`（共享 RTX 5090，`:8190`）：重装 Python 3.13 + cu128 环境并从 hf-mirror 重新下载权重，运行环境放 NFS 避免容器重建丢失；生成或参考分析前按需卸载 TTS、MOSS 与 qrealign 释放显存，被卸载服务下次请求自动重载。
+
++ [新增] H3 视频 API 新增 `POST /v1/avatars` 音频驱动数字人接口：剔除文本大模型和 TTS 冗余模块，通过 `LTXVAudioVAEEncode` + `SetLatentNoiseMask(0)` 在联合潜空间锁定音频，支持 `reference`（`mode=auto` 默认，无首帧跳变，支持 1–9 张图或 0–3 段剥离原声的参考视频+音频+可选文字提示词）和 `anchor`（显式首帧锁定，可选首尾锚定），复用 DMAD + SelfLift 8 步（≤1.1MP 自动免空间分块提速约 40%）；支持 `resolution=original` 保持原图尺寸；超长音频支持在 `max_segment_seconds`（默认 10 秒，5–15 秒可配）内按 `ffmpeg silencedetect` 静音停顿智能切片分段，第 2 段起用上一段末帧 + `MiniMaxH3AddGuide` 无缝衔接，最终把清晰原声精确回填并支持 `face_refine` 小脸修复；云端已部署并通过 720p/原图分辨率（896×1184）、自定义 prompt、16.96s 长音频两段无缝拼接（407 帧 / 16.958s）及视频+图+音频实测。
+
++ [新增] H3 视频 API 新增 `POST /v1/transfers` 人物替换 / 动作迁移：`mode=replace` 用 AddGuide + Character Swap v1.1 LoRA 锁定源场景只换主体；`mode=motion` 用松散参考视频 `ref_videos` + 参考图 `ref_images` 把源视频动作迁移到人物图自身背景（推荐传与源视频同构图/同起始姿态的重绘首帧）。两种模式都复用 DMAD + SelfLift 8 步；源视频支持任意帧率和常见格式并自动转 24fps，超过 8.7 秒自动分镜（最多 60 段），生成帧数向上取 `17k+5` 后精确裁回源帧数，成片时长和音画与源片段一致；`face_refine=true` 可选小脸修复；transfer 源视频单文件 ≤512MB、总 ≤640MB 流式写盘。云端已安装 Character Swap LoRA、`ComfyUI-H3-FaceRefine`、`ultralytics`、`imageio-ffmpeg` 和 `face_yolov8m.pt`；实测 5 秒 motion（重绘首帧）、20.67 秒自动分镜替换（496 帧/20.667 秒音画一致）、3 秒 30fps 输入转 24fps（72 帧/3.0 秒）、FaceRefine 单段均完成。
+
++ [新增] H3 视频 API 支持无缝循环视频：新增 `loop` / `loop_pad_clips` / `loop_views` / `loop_rotate` 参数，使用 Pika H3 Flex 6 步 LoRA + `MiniMaxH3Loop` / `MiniMaxH3LoopDecode`（圆周上下文采样与解码），需要 reference 图/视频，固定 6 步且不叠加 DMAD/SelfLift/X2；云端已安装节点包与 1.96GB LoRA，实测 512×512/119 帧约 17 秒、1024×1024 约 2 分 16 秒、`loop_views=2` 带音频约 29 秒。
+
++ [新增] 新增云端服务清单 `services/README.md` 与本地凭据模板 `services/.env.example`：集中记录图片 API（8192，无鉴权）、视频 API（8193）、FireRedTTS3（8196）、MOSS-Audio（8194）、Q-ReAlign（8195）和直连 ComfyUI 的端点、鉴权、健康检查与最小调用示例；真实 token 放 `services/.env.local`（被 `.gitignore` 忽略）。
+
++ [新增] FireRedTTS3 服务新增音色融合接口 `POST /v1/tts/fusion`：两段参考音频的 CAM++ speaker embedding 按 `alpha`（0=A、1=B）用保范数 SLERP 融合，prompt 可选 `a` / `b` / `auto`（auto 固定 A 的 prompt 保证全程平滑）；实测 α=0/0.5/1 生成 1.76–2.08s，不再退化成长音频循环。
+
++ [新增] MiniMax H3 支持参考视频：`video-generation` 技能、视频 API 和画布 H3 工作流改用 ComfyUI 内置 `LoadVideo` + `GetVideoComponents` 读取参考视频（最多 3 段，按 24fps 解释，自带音轨同步作为参考音频），不再依赖 `VHS_LoadVideo`；技能已实测 480p fast 参考视频生成成功。
+
++ [新增] 新增独立的 MiniMax H3 视频任务服务（`services/comfyui-video-api`，vgen 云端 8193 经 `/proxy/8193`）：异步提交/轮询/下载/取消/列表，Bearer token；支持 text / frames / reference、fast / standard、int8 / BF16、x2、音频、秒数或显式帧数、分辨率/比例/显式宽高、seed、CRF、metadata、`task_id` / `idempotency_key` 幂等和 `wait` 同步等待；任务 JSON 原子落盘、后台对账、完成后把 MP4 归档到持久盘，`MAX_PENDING_TASKS` 超限返回 429。已实测鉴权、异步生成、下载、参考图、取消、幂等、frames + X2 + 音频和杀进程后 watchdog 自动拉起、已归档任务重启后仍可下载。
++ [修复] 修复 H3 X2 解码在 ComfyUI `temp` 目录缺失时写临时 MP4 报 `[Errno 2] No such file or directory`：`h3_x2_decode` 写入前自动创建目录，`deploy-h3.sh` 也会补建 `ComfyUI/temp`。
+
++ [新增] 生图 API 高可用增强：保守限流（ComfyUI 运行中 + 排队共 32 个、同步抠图并发 4、单文件 20MB，超限 429 + `Retry-After`）、每任务锁、生图/抠图取消接口、抠图任务持久化与 `wait=false` 异步模式、`recover/watchdog.sh` 自动重启；启动脚本改为幂等，实测 3 并发为 1 运行 + 2 排队、取消、429 和 watchdog 恢复均通过。
++ [调整] MiniMax H3 视频云端迁移到新机 `dep457-hzlizhaoming-vgen`（aliyun-hangzhou-2，RTX 5090 32G，与 genearate 共用 NFS 家目录）：恢复 ComfyUI 0.44.2、H3 int8/BF16 权重、DMAD 4 步 LoRA、LMS latent 上采样与 X2 VAE，新增 selflift-Avatar / YCNodes / h3_x2_decode 节点；针对驱动 575 最高 CUDA 12.9、预编译 comfy-kitchen 内核要求 CUDA 13 导致的 `detect_k_anchor` 失败，改用 CUDA 12.8 从源码为 sm_120 编译内核并由 `zz_kitchen_cuda` 重新启用。480p fast/standard/reference 与 4K X2 已实测通过；画布 H3 改走 `/h3`（`COMFYUI_VIDEO_REMOTE_URL`），图像仍走 `/comfyui`。
++ [新增] H3 云端恢复与备份：`recover/backup.sh` 每日快照 ComfyUI 自定义节点、API 源码、Jupyter 配置、恢复脚本、cu128 comfy-kitchen wheel 与模型清单（size + sha256），保留 7 天；`start-services.sh` 拉起 ComfyUI/API/备份循环，Jupyter `auto_services` 扩展在容器重启后自动执行；已实测完整重启后 8188/8192 代理与服务自动恢复。
+
++ [新增] 新机新增恢复手册与脚本（`services/comfyui-image-api/recover/`）：明确 NFS 持久卷与 `/var/tmp`、根盘的丢失边界，提供 `start-services.sh` 冷启动、`deploy.sh` 全量重建、常见故障处理和 H3 下载续传说明；同时提供 `cleanup.sh` 按时间/容量清理生图输出、参考图上传和 API 任务记录（默认 dry-run）。
++ [修复] 修复云端 ComfyUI 因自定义节点代码覆盖核心 `nodes.py` 导致启动报 `init_extra_nodes` 缺失的问题：已备份被覆盖文件并恢复官方 v0.44.2 `nodes.py`；恢复手册中明确自定义节点只能放 `custom_nodes/`。
++ [新增] 生图 HTTP API 新增 `POST /v1/background-removal` 抠图接口：基于 BiRefNet General 返回带 Alpha 通道的透明 PNG，支持模型、设备、dtype 与超时参数；云端已安装 `ComfyUI_BiRefNet_ll` 节点和约 424MB 权重，真实人像抠图实测通过。
++ [新增] 新增独立的 ComfyUI 生图 HTTP API（`services/comfyui-image-api`，云端 8192 经 `/proxy/8192`）：异步提交/轮询/下载，支持提示词、负向提示词、1K/1.5K/2K/4K 与显式宽高、最多 10 张参考图编辑与跟随原图、步数/CFG/种子/张数、SeedVR2 自定义超分长边；自带 `/docs` 与 `/openapi.json`，文生图、参考图编辑、4K 已实测。
++ [调整] Qwen Image 2.1 云端 ComfyUI 迁移到新机 `dep457-hzlizhaoming-genearate`（aliyun-hangzhou-2，RTX 5090 32G）：ComfyUI 0.44.2、PyTorch 2.9.1+cu128（新机驱动 575 最高 CUDA 12.9，原 cu130 环境无法初始化）、Python 3.12、Node 22，重新部署 Qwen 2.1 与 SeedVR2 权重并启用 Jupyter `/proxy/8188`；文生图、参考图编辑、4K 超分已实测通过，本地 `/comfyui` 转发地址与 image-generation 技能默认地址已切换。
++ [新增] `.agents/skills` 新增图像、视频、音乐三个云端生成技能：分别直连 Qwen Image 2.1 / MiniMax H3 ComfyUI 与 YuE2 服务，统一支持异步提交、断点续查、超时恢复和产物下载，可脱离画布被其他应用复用。
++ [修复] 图像生成技能修正 Qwen Image 2.1 文生图 latent：ComfyUI 的 `EmptyLatentImage` 只有 4 通道，Qwen 2.1 需要 64 通道/16 倍下采样，改为使用 `TextEncodeQwenImage21` 的 latent 并由 `LatentUpscale` 对齐目标尺寸。
 + [优化] FireRedAudio 改为常驻推理进程：模型只在首个任务加载一次，任务间不再重复几十秒重载；连续 30 分钟无任务（`FIRERED_IDLE_UNLOAD_SECONDS`，设 0 关闭）自动释放显存，下个任务自动重载；推理进程崩溃后任务报中断且后续任务自动拉起新进程。需重新部署 `services/firered-audio` 生效。
 + [新增] 画布接入 FireRedAudio 语音模型（第二台 RTX 5090，经 `/firered` 代理）：音频节点支持声音克隆（参考转写留空自动识别）、声音设计与语义语音编辑，支持中英语言与随机种子，输出 24kHz WAV；克隆参考、编辑目标支持浏览器能上传的任意音频格式（服务端 ffmpeg 统一转码）。
 + [新增] 文本节点新增 FireRedAudio 识别与理解模型：连接音频参考后留空生成即语音转文字，输入问题即音频问答（推理力度非「自动」时启用思维链），空提示词提交放行。
