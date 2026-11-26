@@ -31,7 +31,8 @@ import { audioMetadata, createCanvasNode } from "@workbench/lib/canvas/canvas-no
 import { getGroupResourceNodes } from "@workbench/lib/canvas/canvas-resource-references";
 import { hostActions } from "@workbench/lib/canvas/host-actions";
 import { createMusicAnalysis, createMusicGenerationTask, getMusicGenerationContent, getMusicGenerationScore, MusicApiError, uploadMusicReference, waitForMusicAnalysis, waitForMusicGenerationTask } from "@workbench/services/api/music";
-import { deleteStoredMedia, readMediaBlob, uploadMediaFile, type UploadedFile } from "@workbench/services/file-storage";
+import { readMediaBlob, uploadMediaFile, type UploadedFile } from "@workbench/services/file-storage";
+import { storage } from "@workbench/services/storage/runtime";
 import { useThemeStore } from "@workbench/stores/use-theme-store";
 import { workbenchMessageOptions } from "@workbench/components/ui/sonner";
 import { CanvasDialog } from "./canvas-dialog";
@@ -85,7 +86,7 @@ export function CanvasMusicNodePanel({ ctx }: CanvasNodePanelProps) {
     const [localRunning, setLocalRunning] = useState(false);
     const controllerRef = useRef<AbortController | null>(null);
 
-    const draft = readMusicDraft(node.metadata);
+    const draft = readMusicDraft(node.metadata as CanvasNodeMetadata | undefined);
     const taskId = node.metadata?.musicTaskId;
     const pendingTask = hasResumableMusicTask(node);
     const analysisPending = Boolean(node.metadata?.musicAnalysisId) && (node.metadata?.musicAnalysisStatus === "queued" || node.metadata?.musicAnalysisStatus === "running");
@@ -288,7 +289,7 @@ export function CanvasMusicNodePanel({ ctx }: CanvasNodePanelProps) {
             });
             attached = true;
         } catch (error) {
-            if (!attached && uploaded?.storageKey) await deleteStoredMedia([uploaded.storageKey]).catch(() => {});
+            if (!attached && uploaded?.storageKey) await storage.media.removeItem(uploaded.storageKey).catch(() => {});
             if (!signal.aborted) {
                 const detail = error instanceof Error ? error.message : "音乐生成失败";
                 const missingTask = error instanceof MusicApiError && error.status === 404;

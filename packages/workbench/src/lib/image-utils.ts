@@ -28,3 +28,19 @@ export function getDataUrlByteSize(dataUrl: string) {
     return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
 }
 
+export async function dataUrlToFile(image: { name?: string; type?: string; dataUrl: string }) {
+    const response = await fetch(image.dataUrl);
+    const blob = await response.blob();
+    return new File([blob], image.name || `reference-${Date.now()}.png`, { type: image.type || blob.type || "image/png" });
+}
+
+export function readImageMeta(src: string): Promise<{ width: number; height: number }> {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth || 0, height: img.naturalHeight || 0 });
+        img.onerror = () => resolve({ width: 0, height: 0 });
+        img.src = src;
+    });
+}
+
+

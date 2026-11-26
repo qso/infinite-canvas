@@ -91,7 +91,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
             return;
         }
         let alive = true;
-        void readImageMeta(url).then((meta) => {
+        void readImageMeta(url).then((meta: { width: number; height: number }) => {
             if (alive) setFirstReferenceSize({ width: meta.width, height: meta.height });
         });
         return () => {

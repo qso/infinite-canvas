@@ -270,7 +270,7 @@ export function CanvasNodePromptPanel({ ctx, mode, onImageSettingsOpenChange }: 
                     ) : mode === "audio" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
-                            <CanvasAudioSettingsPopover config={config} metadata={node.metadata} hasAudioReference={hasAudioReference} onAutoTranscribe={handleFireRedAutoTranscribe} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                            <CanvasAudioSettingsPopover config={config} metadata={node.metadata as CanvasNodeData["metadata"]} hasAudioReference={hasAudioReference} onAutoTranscribe={handleFireRedAutoTranscribe} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
                     ) : (
                         <>

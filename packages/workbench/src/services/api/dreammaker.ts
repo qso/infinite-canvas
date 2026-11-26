@@ -92,6 +92,10 @@ async function fetchGatewayJson<T>(url: string, init: RequestInit, fallback: str
             throw new Error(`${fallback}（HTTP ${response.status}）`);
         }
         if (parsed?.code && parsed.code !== 0) {
+            const dataObj = parsed.data && typeof parsed.data === "object" ? (parsed.data as Record<string, unknown>) : null;
+            if (dataObj && typeof dataObj.status === "string") {
+                return { ...dataObj, message: readGatewayError(parsed, fallback) } as T;
+            }
             throw new Error(readGatewayError(parsed, fallback));
         }
         return (parsed?.data ?? ({} as T));

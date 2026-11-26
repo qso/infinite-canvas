@@ -437,10 +437,10 @@ export function useNodeGeneration(session: CanvasSession, { setDialogNodeId, cap
                     videoMode: node.metadata?.videoMode,
                 },
             };
-            commitHostTransaction(session, [
+            session.transact([
                 { type: "add_node", node: childNode },
                 { type: "connect_nodes", connection: { id: nanoid(), fromNodeId: node.id, toNodeId: childId } },
-            ], { selection: { nodeIds: [childId], connectionId: null } });
+            ], { selection: { nodeIds: [childId], connectionId: null }, source: { kind: "ui" } });
             setDialogNodeId(null);
             setRunningNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
@@ -1221,10 +1221,10 @@ export function useNodeGeneration(session: CanvasSession, { setDialogNodeId, cap
             height: spec.height,
             metadata: { prompt: description, status: NODE_STATUS_LOADING, model: FIRERED_SPEECH_OPTION },
         };
-        commitHostTransaction(session, [
+        session.transact([
             { type: "add_node", node: derived },
             { type: "connect_nodes", connection: { id: nanoid(), fromNodeId: node.id, toNodeId: audioId } },
-        ], { selection: { nodeIds: [audioId], connectionId: null } });
+        ], { selection: { nodeIds: [audioId], connectionId: null }, source: { kind: "ui" } });
         const controller = startGenerationRequest(audioId, node.id, audioId);
         try {
             const reference: ReferenceAudio = { id: node.id, name: `${node.title || node.id}.wav`, type: node.metadata?.mimeType || "audio/wav", url: node.metadata?.content, storageKey: node.metadata?.storageKey, durationMs: node.metadata?.durationMs };

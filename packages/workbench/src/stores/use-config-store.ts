@@ -33,6 +33,11 @@ export type AiConfig = {
     audioFormat: string;
     audioSpeed: string;
     audioInstructions: string;
+    audioFireRedMode?: string;
+    audioFireRedTranscript?: string;
+    audioFireRedVoiceDesc?: string;
+    audioFireRedLanguage?: string;
+    audioFireRedSeed?: string;
     videoSize: string;
     videoSeconds: string;
     vquality: string;
